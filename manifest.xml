@@ -4,11 +4,13 @@
      CS790Ass01
 
   </description>
-  <author>JD Marble</author>
+  <author>J.D. Marble</author>
   <license>BSD</license>
   <review status="unreviewed" notes=""/>
   <url>http://ros.org/wiki/CS790Ass01</url>
 
+  <depend package="roscpp"/>
+  <depend package="ompl"/>
+  <rosdep name="pqp"/>
+
 </package>
-
-
