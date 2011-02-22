@@ -25,119 +25,122 @@
 #include <ompl/base/samplers/UniformValidStateSampler.h>
 #include <ompl/base/samplers/GaussianValidStateSampler.h>
 #include <ompl/base/samplers/ObstacleBasedValidStateSampler.h>
+
+#include <ros/ros.h>
+#include <ros/param.h>
+
+#include <boost/foreach.hpp>
+#define foreach BOOST_FOREACH
+
 using namespace ompl;
 
-void benchmark0(std::string& benchmark_name, app::SE3RigidBodyPlanning& setup,
-    double& runtime_limit, double& memory_limit, int& run_count)
+template <typename T>
+T requireGet(const std::string& param_name)
 {
-    benchmark_name = std::string("cubicles");
-    std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/cubicles_robot.dae";
-    std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/cubicles_env.dae";
-    setup.setRobotMesh(robot_fname.c_str());
-    setup.setEnvironmentMesh(env_fname.c_str());
+    T t;
+    if (!ros::param::get(param_name, t))
+    {
+        ROS_ERROR_STREAM("Can't find required parameter " << param_name << ".");
+    }
 
-    base::ScopedState<base::SE3StateManifold> start(setup.getSpaceInformation());
-    start->setX(-4.96);
-    start->setY(70.57);
-    start->setZ(40.62);
-    start->rotation().setIdentity();
-
-    base::ScopedState<base::SE3StateManifold> goal(start);
-    goal->setX(200.49);
-    goal->setY(70.57);
-    goal->setZ(40.62);
-    goal->rotation().setIdentity();
-
-    setup.setStartAndGoalStates(start, goal);
-    setup.getSpaceInformation()->setStateValidityCheckingResolution(0.01);
-    setup.getSpaceInformation()->setValidStateSamplerAllocator(base::UniformValidStateSampler::allocator());
-
-    runtime_limit = 10.0;
-    memory_limit  = 10000.0; // set high because memory usage is not always estimated correctly
-    run_count     = 500;
+    return t;
 }
 
-void benchmark1(std::string& benchmark_name, app::SE3RigidBodyPlanning& setup,
+void getState(const std::string& param_name, base::ScopedState<base::SE3StateManifold>& state)
+{
+    XmlRpc::XmlRpcValue elements = requireGet<XmlRpc::XmlRpcValue>(param_name);
+    ROS_ASSERT(elements.getType() == XmlRpc::XmlRpcValue::TypeArray);
+    ROS_ASSERT(elements.size() == 7);
+    
+    for (int i = 0; i < elements.size(); ++i)
+        ROS_ASSERT(elements[i].getType() == XmlRpc::XmlRpcValue::TypeDouble);
+
+    state->setXYZ(
+        static_cast<double>(elements[0]),
+        static_cast<double>(elements[1]),
+        static_cast<double>(elements[2])
+    );
+
+    state->rotation().setAxisAngle(
+        static_cast<double>(elements[3]),
+        static_cast<double>(elements[4]),
+        static_cast<double>(elements[5]),
+        static_cast<double>(elements[6])
+    );
+
+    ROS_DEBUG_STREAM("Set state to " << state);
+}
+
+void benchmark_setup(std::string& benchmark_name, app::SE3RigidBodyPlanning& setup,
     double& runtime_limit, double& memory_limit, int& run_count)
 {
-    benchmark_name = std::string("Twistycool");
-    std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/Twistycool_robot.dae";
-    std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/Twistycool_env.dae";
-    setup.setRobotMesh(robot_fname.c_str());
-    setup.setEnvironmentMesh(env_fname.c_str());
+    benchmark_name = requireGet<std::string>("environment");
+    {
+        const std::string root_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/" + benchmark_name;
+        const std::string robot_fname = root_fname + "_robot.dae";
+        const std::string env_fname = root_fname + "_env.dae";
+        setup.setRobotMesh(robot_fname.c_str());
+        setup.setEnvironmentMesh(env_fname.c_str());
+    }
 
-    base::ScopedState<base::SE3StateManifold> start(setup.getSpaceInformation());
-    start->setX(270.);
-    start->setY(160.);
-    start->setZ(-200.);
-    start->rotation().setIdentity();
+    {
+        base::ScopedState<base::SE3StateManifold> start(setup.getSpaceInformation());
+        getState("start", start);
+        base::ScopedState<base::SE3StateManifold> goal(start);
+        getState("goal", goal);
+        setup.setStartAndGoalStates(start, goal);
+    }
 
-    base::ScopedState<base::SE3StateManifold> goal(start);
-    goal->setX(270.);
-    goal->setY(160.);
-    goal->setZ(-400.);
-    goal->rotation().setIdentity();
+    {
+        const double resolution = requireGet<double>("StateValidityCheckingResolution");
+        setup.getSpaceInformation()->setStateValidityCheckingResolution(resolution);
+    }
+    
+    {
+        base::ValidStateSamplerAllocator allocator;
+        
+        const std::string sampler = requireGet<std::string>("sampler");
+        if (sampler == "UniformValidStateSampler")
+            allocator = base::UniformValidStateSampler::allocator();
+        else if (sampler == "GaussianValidStateSampler")
+            allocator = base::GaussianValidStateSampler::allocator();
+        else if (sampler == "ObstacleBasedValidStateSampler")
+            allocator = base::ObstacleBasedValidStateSampler::allocator();
+        else
+            ROS_ERROR_STREAM("Invalid sampler name: " << sampler);
 
-    base::RealVectorBounds bounds(3);
-    bounds.setHigh(0,400.);
-    bounds.setHigh(1,275.);
-    bounds.setHigh(2,-100.);
-    bounds.setLow(0,60.);
-    bounds.setLow(1,0.);
-    bounds.setLow(2,-480.);
-    setup.getStateManifold()->as<base::SE3StateManifold>()->setBounds(bounds);
+        setup.getSpaceInformation()->setValidStateSamplerAllocator(allocator);
+        benchmark_name.append("_" + sampler);
+    }
 
-    setup.setStartAndGoalStates(start, goal);
-    setup.getSpaceInformation()->setStateValidityCheckingResolution(0.01);
-
-    runtime_limit = 90.0;
-    memory_limit  = 10000.0; // set high because memory usage is not always estimated correctly
-    run_count     = 50;
+    runtime_limit = requireGet<double>("runtime_limit");
+    memory_limit = requireGet<double>("memory_limit");
+    run_count = requireGet<int>("run_count");
 }
+
 
 int main(int argc, char **argv)
 {
+    ros::init(argc, argv, "CS790Ass01");
+    ros::NodeHandle node;
+
     app::SE3RigidBodyPlanning setup;
     std::string benchmark_name;
     double runtime_limit, memory_limit;
     int run_count;
-    int benchmark_id = argc==1 ? 0 : (atoi(argv[1]) % 2);
-
-    if (benchmark_id==0)
-        benchmark0(benchmark_name, setup, runtime_limit, memory_limit, run_count);
-    else
-        benchmark1(benchmark_name, setup, runtime_limit, memory_limit, run_count);
+    benchmark_setup(benchmark_name, setup, runtime_limit, memory_limit, run_count);
 
     // create the benchmark object and add all the planners we'd like to run
     Benchmark b(setup, benchmark_name);
-    b.addPlanner(base::PlannerPtr(new geometric::RRTConnect(setup.getSpaceInformation())));
-    b.addPlanner(base::PlannerPtr(new geometric::RRT(setup.getSpaceInformation())));
-    //    b.addPlanner(base::PlannerPtr(new geometric::LazyRRT(setup.getSpaceInformation())));
-    b.addPlanner(base::PlannerPtr(new geometric::LBKPIECE1(setup.getSpaceInformation())));
-    b.addPlanner(base::PlannerPtr(new geometric::KPIECE1(setup.getSpaceInformation())));
-    b.addPlanner(base::PlannerPtr(new geometric::SBL(setup.getSpaceInformation())));
-    b.addPlanner(base::PlannerPtr(new geometric::EST(setup.getSpaceInformation())));
     b.addPlanner(base::PlannerPtr(new geometric::BasicPRM(setup.getSpaceInformation())));
+    b.addPlanner(base::PlannerPtr(new geometric::RRT(setup.getSpaceInformation())));
+    b.addPlanner(base::PlannerPtr(new geometric::EST(setup.getSpaceInformation())));
+    b.addPlanner(base::PlannerPtr(new geometric::SBL(setup.getSpaceInformation())));
+    b.addPlanner(base::PlannerPtr(new geometric::KPIECE1(setup.getSpaceInformation())));
 
-    // run all planners with a uniform valid state sampler on the benchmark problem
-    setup.getSpaceInformation()->setValidStateSamplerAllocator(base::UniformValidStateSampler::allocator());
-    b.setExperimentName(benchmark_name + "_uniform_sampler");
+    // run all planners on the benchmark problem
     b.benchmark(runtime_limit, memory_limit, run_count, true);
-    b.saveResultsToFile();
-
-
-    // run all planners with a Gaussian valid state sampler on the benchmark problem
-    setup.getSpaceInformation()->setValidStateSamplerAllocator(base::GaussianValidStateSampler::allocator());
-    b.setExperimentName(benchmark_name + "_gaussian_sampler");
-    b.benchmark(runtime_limit, memory_limit, run_count, true);
-    b.saveResultsToFile();
-
-
-    // run all planners with a obstacle-based valid state sampler on the benchmark problem
-    setup.getSpaceInformation()->setValidStateSamplerAllocator(base::ObstacleBasedValidStateSampler::allocator());
-    b.setExperimentName(benchmark_name + "_obstaclebased_sampler");
-    b.benchmark(runtime_limit, memory_limit, run_count, true);
-    b.saveResultsToFile();
+    b.saveResultsToFile((benchmark_name + ".log").c_str());
 
     return 0;
 }
