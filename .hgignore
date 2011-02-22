@@ -2,3 +2,4 @@ build
 nbproject
 .dep.inc
 .*-Makefile.mk
+bin/
