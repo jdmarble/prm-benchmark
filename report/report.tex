@@ -20,10 +20,23 @@ Five planning techniques were tested: PRM, RRT, EST, SBL, and KPIECE. For each o
 
 \subsection{Environments}
 
-The "Apartment" environment provided with omplapp was used in the experiments.  It is complex with many detailed obstacles. The robot is a piano that must be moved to the kitchen. It should be time consuming to check for collisions in this setup.
+The "Apartment" environment (Fig. \ref{fig:apartment}) provided with omplapp was used in the experiments.  It is complex with many detailed obstacles. The robot is a piano that must be moved to the kitchen. It should be time consuming to check for collisions in this setup.
 
-The experiments were also run on the "Easy" environment and robot. None of the variations of experimental parameters showed significant differences in results, however. The remainder of this report details only the results from the "Apartment" environment.
+\begin{figure}
+  \centering
+    \includegraphics[width=0.4\textwidth]{Apartment}
+  \caption{The ``Apartment'' environment and robot.}
+  \label{fig:apartment}
+\end{figure}
 
+The experiments were also run on the "Easy" environment and robot (Fig. \ref{fig:easy}). None of the variations of experimental parameters showed significant differences in results, however. The remainder of this report details only the results from the "Apartment" environment.
+
+\begin{figure}
+  \centering
+    \includegraphics[width=0.3\textwidth]{Easy}
+  \caption{The ``Easy'' environment and robot.}
+  \label{fig:easy}
+\end{figure}
 
 \section{Results}
 
@@ -31,7 +44,7 @@ One technique or sampler does not dominate all others in every measure.
 
 \subsection{Success Rate}
 
-PRM has a low success rate (5-15\%). SBL succeeds in finding a solution 50-75\% of the time except with the obstacle-based sampler (5\%).  RRT, EST, and KPIECE all have 100\% success rate.
+PRM had a low success rate (5-15\%) in this environment. SBL succeeded in finding a solution 50-75\% of the time except with the obstacle-based sampler (5\%).  RRT, EST, and KPIECE all have 100\% success rate.
 
 
 \subsection{Time}
@@ -50,7 +63,7 @@ When the PRM did find a solution (which was rare), its length was second only to
 
 Smoothing was able to get SBL and KPIECE very close to the length of the PRM solutions and EST was able to be smoothed down to the length of the RRT solutions. The PRM solutions were not improved noticeably by smoothing.
 
-The time to smooth the path was a fraction of a second and the time it took PRM to find that quality of a solution was on the order of a minute. So, path smoothing is very important to get the quality of the faster technique's solution to the level of the slower PRM. The small time investment of smoothing makes is worthwhile.
+The time to smooth the path was a fraction of a second and the time it took PRM to find that quality of a solution was on the order of a minute. So, path smoothing is very important to get the quality of the faster technique's solution to the level of the slower PRM. The small time investment of smoothing makes it worthwhile in this environment.
 
 
 \subsection{State Sampler}
@@ -62,19 +75,7 @@ The obstacle-based state sampler greatly reduced the number of edges and nodes f
 
 \subsection{}
 
-The example benchmark program was modified to accept the following parameters from a YAML file:
-
-\begin{itemize}
-\item environment and robot
-\item state sampler
-\item start state
-\item goal state
-\item state validity checking resolution
-\item time limit
-\item memory limit
-\item run count
-\end{itemize}
-
+The example benchmark program was modified to accept parameters from a YAML file.
 Once the example benchmark was compiling under a separate project, it was trivial (1, 1 hour) to modify it to accept parameters at run time. Actually getting it to link to all the dependencies was slightly more difficult (4, 2 hours).
 
 \subsection {}
