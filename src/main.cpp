@@ -21,6 +21,7 @@
 #include <ompl/geometric/planners/sbl/SBL.h>
 #include <ompl/geometric/planners/est/EST.h>
 #include <ompl/geometric/planners/prm/BasicPRM.h>
+#include <ompl/geometric/planners/prm/KNearestPRMStar.h>
 
 #include <ompl/base/samplers/UniformValidStateSampler.h>
 #include <ompl/base/samplers/GaussianValidStateSampler.h>
@@ -121,7 +122,7 @@ void benchmark_setup(std::string& benchmark_name, app::SE3RigidBodyPlanning& set
 
 int main(int argc, char **argv)
 {
-    ros::init(argc, argv, "CS790Ass01");
+    ros::init(argc, argv, "ompl_benchmark");
     ros::NodeHandle node;
 
     app::SE3RigidBodyPlanning setup;
@@ -133,10 +134,7 @@ int main(int argc, char **argv)
     // create the benchmark object and add all the planners we'd like to run
     Benchmark b(setup, benchmark_name);
     b.addPlanner(base::PlannerPtr(new geometric::BasicPRM(setup.getSpaceInformation())));
-    b.addPlanner(base::PlannerPtr(new geometric::RRT(setup.getSpaceInformation())));
-    b.addPlanner(base::PlannerPtr(new geometric::EST(setup.getSpaceInformation())));
-    b.addPlanner(base::PlannerPtr(new geometric::SBL(setup.getSpaceInformation())));
-    b.addPlanner(base::PlannerPtr(new geometric::KPIECE1(setup.getSpaceInformation())));
+    b.addPlanner(base::PlannerPtr(new geometric::KNearestPRMStar(setup.getSpaceInformation())));
 
     // run all planners on the benchmark problem
     b.benchmark(runtime_limit, memory_limit, run_count, true);

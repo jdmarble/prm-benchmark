@@ -1,13 +1,12 @@
 <package>
-  <description brief="CS790Ass01">
+  <description brief="ompl-benchmark">
 
-     CS790Ass01
+     OMPL-benchmark
 
   </description>
   <author>J.D. Marble</author>
   <license>BSD</license>
   <review status="unreviewed" notes=""/>
-  <url>http://ros.org/wiki/CS790Ass01</url>
 
   <depend package="roscpp"/>
   <rosdep name="pqp"/>

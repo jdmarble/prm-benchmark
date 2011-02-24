@@ -14,10 +14,12 @@ rosbuild_init()
 #set the default path for built executables to the "bin" directory
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 
-set(OMPL_DIR "~/opt/omplapp-0.9.1-Source")
-include_directories (${OMPL_DIR}/ompl/src)                     #ompl
-include_directories (${OMPL_DIR}/src)                          #ompl-app
-include_directories (${OMPL_DIR}/assimp-prefix/include/assimp) #assimp
+set(OMPL_DIR "~/Documents/code/ompl")
+include_directories (${OMPL_DIR}/src)                     #ompl
+
+set(OMPLAPP_DIR "~/opt/omplapp")
+include_directories (${OMPLAPP_DIR}/src)                          #ompl-app
+include_directories (${OMPLAPP_DIR}/assimp-prefix/include/assimp) #assimp
 
 include_directories (${PROJECT_SOURCE_DIR}/include)
 file(GLOB_RECURSE PROJECT_SRC src/*.cpp)
@@ -26,4 +28,5 @@ rosbuild_add_executable(${PROJECT_NAME} ${PROJECT_SRC})
 #rosbuild_add_boost_directories()
 #rosbuild_link_boost(${PROJECT_NAME} thread)
 
-target_link_libraries(${PROJECT_NAME} ${OMPL_DIR}/lib/libompl_app.so)
+target_link_libraries(${PROJECT_NAME} /Users/jdmarble/opt/omplapp/lib/libompl_app.dylib)
+target_link_libraries(${PROJECT_NAME} /Users/jdmarble/opt/omplapp/lib/libompl.dylib)

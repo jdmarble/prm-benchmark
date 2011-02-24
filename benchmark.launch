@@ -2,14 +2,14 @@
   <arg name="sampler" default="UniformValidStateSampler"/>
   <param name="sampler" value="$(arg sampler)"/>
   <rosparam>
-    environment: Apartment
-    start: [-31.19, 36.46, 99.85, 1.0, 0.0, 0.0, 0.0]
-    goal:  [250.19, 36.46, 28.85, 1.0, 0.0, 0.0, 0.0]
+    environment: cubicles
+    start: [0.0,   70.0, 40.0, 1.0, 0.0, 0.0, 0.0]
+    goal:  [150.0, 70.0, 50.0, 1.0, 0.0, 0.0, 0.0]
     StateValidityCheckingResolution: 0.01
-    runtime_limit: 60.0
+    runtime_limit: 240.0
     memory_limit: 10000.0
     run_count: 31
   </rosparam>
-  <node name="CS790Ass01" pkg="CS790Ass01" type="CS790Ass01"
+  <node name="$(anon ompl-benchmark)" pkg="ompl-benchmark" type="ompl-benchmark"
     required="true" cwd="node" output="screen"/>
 </launch>
