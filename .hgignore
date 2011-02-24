@@ -1,5 +1,7 @@
-build
 nbproject
+Makefile-*.
 .dep.inc
-.*-Makefile.mk
 bin/
+CMakeFiles/
+CMakeCache\.txt
+.cmake

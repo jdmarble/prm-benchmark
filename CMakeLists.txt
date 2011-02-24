@@ -1,32 +1,25 @@
-cmake_minimum_required(VERSION 2.4.6)
-include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
+cmake_minimum_required(VERSION 2.6.2)
+project(ompl-benchmark)
 
-# Set the build type.  Options are:
-#  Coverage       : w/ debug symbols, w/o optimization, w/ code-coverage
-#  Debug          : w/ debug symbols, w/o optimization
-#  Release        : w/o debug symbols, w/ optimization
-#  RelWithDebInfo : w/ debug symbols, w/ optimization
-#  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-set(ROS_BUILD_TYPE Debug)
+set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/CMakeModules)
+message("${PROJECT_SOURCE_DIR}/CMakeModules")
 
-rosbuild_init()
+find_package(OMPL REQUIRED)
+include_directories (${OMPL_INCLUDE_DIR})
 
-#set the default path for built executables to the "bin" directory
+find_package(PQP REQUIRED)
+include_directories (${PQP_INCLUDE_DIR})
+
+find_package(ASSIMP REQUIRED)
+include_directories (${ASSIMP_INCLUDE_DIR})
+
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
-
-set(OMPL_DIR "~/Documents/code/ompl")
-include_directories (${OMPL_DIR}/src)                     #ompl
-
-set(OMPLAPP_DIR "~/opt/omplapp")
-include_directories (${OMPLAPP_DIR}/src)                          #ompl-app
-include_directories (${OMPLAPP_DIR}/assimp-prefix/include/assimp) #assimp
-
 include_directories (${PROJECT_SOURCE_DIR}/include)
 file(GLOB_RECURSE PROJECT_SRC src/*.cpp)
+add_executable(${PROJECT_NAME} ${PROJECT_SRC})
 
-rosbuild_add_executable(${PROJECT_NAME} ${PROJECT_SRC})
-#rosbuild_add_boost_directories()
-#rosbuild_link_boost(${PROJECT_NAME} thread)
-
-target_link_libraries(${PROJECT_NAME} /Users/jdmarble/opt/omplapp/lib/libompl_app.dylib)
-target_link_libraries(${PROJECT_NAME} /Users/jdmarble/opt/omplapp/lib/libompl.dylib)
+target_link_libraries(${PROJECT_NAME}
+	${OMPL_LIBRARY}
+	${PQP_LIBRARY}
+	${ASSIMP_LIBRARY}
+	)

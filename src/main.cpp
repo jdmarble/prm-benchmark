@@ -1,144 +1,185 @@
 /*********************************************************************
-* Rice University Software Distribution License
+* Software License Agreement (BSD License)
 *
-* Copyright (c) 2010, Rice University
-* All Rights Reserved.
+*  Copyright (c) 2010, Rice University
+*  All rights reserved.
 *
-* For a full description see the file named LICENSE.
+*  Redistribution and use in source and binary forms, with or without
+*  modification, are permitted provided that the following conditions
+*  are met:
 *
+*   * Redistributions of source code must retain the above copyright
+*     notice, this list of conditions and the following disclaimer.
+*   * Redistributions in binary form must reproduce the above
+*     copyright notice, this list of conditions and the following
+*     disclaimer in the documentation and/or other materials provided
+*     with the distribution.
+*   * Neither the name of the Rice University nor the names of its
+*     contributors may be used to endorse or promote products derived
+*     from this software without specific prior written permission.
+*
+*  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+*  "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+*  LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+*  FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+*  COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+*  INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+*  BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+*  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+*  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+*  LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+*  ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+*  POSSIBILITY OF SUCH DAMAGE.
 *********************************************************************/
 
 /* Author: Ioan Sucan */
 
-#include <omplapp/config.h>
-#include <omplapp/SE3RigidBodyPlanning.h>
-#include <ompl/benchmark/Benchmark.h>
+#include <ompl/base/SpaceInformation.h>
+#include <ompl/base/manifolds/SE3StateManifold.h>
 #include <ompl/geometric/planners/rrt/RRTConnect.h>
-#include <ompl/geometric/planners/rrt/RRT.h>
-#include <ompl/geometric/planners/rrt/LazyRRT.h>
-#include <ompl/geometric/planners/kpiece/LBKPIECE1.h>
-#include <ompl/geometric/planners/kpiece/KPIECE1.h>
-#include <ompl/geometric/planners/sbl/SBL.h>
-#include <ompl/geometric/planners/est/EST.h>
-#include <ompl/geometric/planners/prm/BasicPRM.h>
-#include <ompl/geometric/planners/prm/KNearestPRMStar.h>
+#include <ompl/geometric/SimpleSetup.h>
 
-#include <ompl/base/samplers/UniformValidStateSampler.h>
-#include <ompl/base/samplers/GaussianValidStateSampler.h>
-#include <ompl/base/samplers/ObstacleBasedValidStateSampler.h>
+#include <ompl/config.h>
+#include <iostream>
 
-#include <ros/ros.h>
-#include <ros/param.h>
+namespace ob = ompl::base;
+namespace og = ompl::geometric;
 
-#include <boost/foreach.hpp>
-#define foreach BOOST_FOREACH
-
-using namespace ompl;
-
-template <typename T>
-T requireGet(const std::string& param_name)
+bool isStateValid(const ob::State *state)
 {
-    T t;
-    if (!ros::param::get(param_name, t))
-    {
-        ROS_ERROR_STREAM("Can't find required parameter " << param_name << ".");
-    }
+    // cast the abstract state type to the type we expect
+    const ob::SE3StateManifold::StateType *se3state = state->as<ob::SE3StateManifold::StateType>();
 
-    return t;
+    // extract the first component of the state and cast it to what we expect
+    const ob::RealVectorStateManifold::StateType *pos = se3state->as<ob::RealVectorStateManifold::StateType>(0);
+
+    // extract the second component of the state and cast it to what we expect
+    const ob::SO3StateManifold::StateType *rot = se3state->as<ob::SO3StateManifold::StateType>(1);
+
+    // check validity of state defined by pos & rot
+
+
+    // return a value that is always true but uses the two variables we define, so we avoid compiler warnings
+    return (void*)rot != (void*)pos;
 }
 
-void getState(const std::string& param_name, base::ScopedState<base::SE3StateManifold>& state)
+void plan(void)
 {
-    XmlRpc::XmlRpcValue elements = requireGet<XmlRpc::XmlRpcValue>(param_name);
-    ROS_ASSERT(elements.getType() == XmlRpc::XmlRpcValue::TypeArray);
-    ROS_ASSERT(elements.size() == 7);
-    
-    for (int i = 0; i < elements.size(); ++i)
-        ROS_ASSERT(elements[i].getType() == XmlRpc::XmlRpcValue::TypeDouble);
+    // construct the manifold we are planning in
+    ob::StateManifoldPtr manifold(new ob::SE3StateManifold());
 
-    state->setXYZ(
-        static_cast<double>(elements[0]),
-        static_cast<double>(elements[1]),
-        static_cast<double>(elements[2])
-    );
+    // set the bounds for the R^3 part of SE(3)
+    ob::RealVectorBounds bounds(3);
+    bounds.setLow(-1);
+    bounds.setHigh(1);
 
-    state->rotation().setAxisAngle(
-        static_cast<double>(elements[3]),
-        static_cast<double>(elements[4]),
-        static_cast<double>(elements[5]),
-        static_cast<double>(elements[6])
-    );
+    manifold->as<ob::SE3StateManifold>()->setBounds(bounds);
 
-    ROS_DEBUG_STREAM("Set state to " << state);
+    // construct an instance of  space information from this manifold
+    ob::SpaceInformationPtr si(new ob::SpaceInformation(manifold));
+
+    // set state validity checking for this space
+    si->setStateValidityChecker(boost::bind(&isStateValid, _1));
+
+    // create a random start state
+    ob::ScopedState<> start(manifold);
+    start.random();
+
+    // create a random goal state
+    ob::ScopedState<> goal(manifold);
+    goal.random();
+
+    // create a problem instance
+    ob::ProblemDefinitionPtr pdef(new ob::ProblemDefinition(si));
+
+    // set the start and goal states
+    pdef->setStartAndGoalStates(start, goal);
+
+    // create a planner for the defined space
+    ob::PlannerPtr planner(new og::RRTConnect(si));
+
+    // set the problem we are trying to solve for the planner
+    planner->setProblemDefinition(pdef);
+
+    // perform setup steps for the planner
+    planner->setup();
+
+
+    // print the settings for this space
+    si->printSettings(std::cout);
+
+    // print the problem settings
+    pdef->print(std::cout);
+
+    // attempt to solve the problem within one second of planning time
+    bool solved = planner->solve(1.0);
+
+    if (solved)
+    {
+        // get the goal representation from the problem definition (not the same as the goal state)
+        // and inquire about the found path
+        ob::PathPtr path = pdef->getGoal()->getSolutionPath();
+        std::cout << "Found solution:" << std::endl;
+
+        // print the path to screen
+        path->print(std::cout);
+    }
+    else
+        std::cout << "No solution found" << std::endl;
 }
 
-void benchmark_setup(std::string& benchmark_name, app::SE3RigidBodyPlanning& setup,
-    double& runtime_limit, double& memory_limit, int& run_count)
+void planWithSimpleSetup(void)
 {
-    benchmark_name = requireGet<std::string>("environment");
-    {
-        const std::string root_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/" + benchmark_name;
-        const std::string robot_fname = root_fname + "_robot.dae";
-        const std::string env_fname = root_fname + "_env.dae";
-        setup.setRobotMesh(robot_fname.c_str());
-        setup.setEnvironmentMesh(env_fname.c_str());
-    }
+    // construct the manifold we are planning in
+    ob::StateManifoldPtr manifold(new ob::SE3StateManifold());
 
-    {
-        base::ScopedState<base::SE3StateManifold> start(setup.getSpaceInformation());
-        getState("start", start);
-        base::ScopedState<base::SE3StateManifold> goal(start);
-        getState("goal", goal);
-        setup.setStartAndGoalStates(start, goal);
-    }
+    // set the bounds for the R^3 part of SE(3)
+    ob::RealVectorBounds bounds(3);
+    bounds.setLow(-1);
+    bounds.setHigh(1);
 
-    {
-        const double resolution = requireGet<double>("StateValidityCheckingResolution");
-        setup.getSpaceInformation()->setStateValidityCheckingResolution(resolution);
-    }
-    
-    {
-        base::ValidStateSamplerAllocator allocator;
-        
-        const std::string sampler = requireGet<std::string>("sampler");
-        if (sampler == "UniformValidStateSampler")
-            allocator = base::UniformValidStateSampler::allocator();
-        else if (sampler == "GaussianValidStateSampler")
-            allocator = base::GaussianValidStateSampler::allocator();
-        else if (sampler == "ObstacleBasedValidStateSampler")
-            allocator = base::ObstacleBasedValidStateSampler::allocator();
-        else
-            ROS_ERROR_STREAM("Invalid sampler name: " << sampler);
+    manifold->as<ob::SE3StateManifold>()->setBounds(bounds);
 
-        setup.getSpaceInformation()->setValidStateSamplerAllocator(allocator);
-        benchmark_name.append("_" + sampler);
-    }
+    // define a simple setup class
+    og::SimpleSetup ss(manifold);
 
-    runtime_limit = requireGet<double>("runtime_limit");
-    memory_limit = requireGet<double>("memory_limit");
-    run_count = requireGet<int>("run_count");
+    // set state validity checking for this space
+    ss.setStateValidityChecker(boost::bind(&isStateValid, _1));
+
+    // create a random start state
+    ob::ScopedState<> start(manifold);
+    start.random();
+
+    // create a random goal state
+    ob::ScopedState<> goal(manifold);
+    goal.random();
+
+    // set the start and goal states; this call allows SimpleSetup to infer the planning manifold, if needed
+    ss.setStartAndGoalStates(start, goal);
+
+    // attempt to solve the problem within one second of planning time
+    bool solved = ss.solve(1.0);
+
+    if (solved)
+    {
+        std::cout << "Found solution:" << std::endl;
+        // print the path to screen
+        ss.simplifySolution();
+        ss.getSolutionPath().print(std::cout);
+    }
+    else
+        std::cout << "No solution found" << std::endl;
 }
 
-
-int main(int argc, char **argv)
+int main(int, char **)
 {
-    ros::init(argc, argv, "ompl_benchmark");
-    ros::NodeHandle node;
+    std::cout << "ompl version: " << OMPL_VERSION << std::endl;
 
-    app::SE3RigidBodyPlanning setup;
-    std::string benchmark_name;
-    double runtime_limit, memory_limit;
-    int run_count;
-    benchmark_setup(benchmark_name, setup, runtime_limit, memory_limit, run_count);
+    plan();
 
-    // create the benchmark object and add all the planners we'd like to run
-    Benchmark b(setup, benchmark_name);
-    b.addPlanner(base::PlannerPtr(new geometric::BasicPRM(setup.getSpaceInformation())));
-    b.addPlanner(base::PlannerPtr(new geometric::KNearestPRMStar(setup.getSpaceInformation())));
+    std::cout << std::endl << std::endl;
 
-    // run all planners on the benchmark problem
-    b.benchmark(runtime_limit, memory_limit, run_count, true);
-    b.saveResultsToFile((benchmark_name + ".log").c_str());
+    planWithSimpleSetup();
 
     return 0;
 }
