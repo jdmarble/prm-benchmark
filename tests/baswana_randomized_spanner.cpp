@@ -48,9 +48,10 @@
 #include <boost/random/linear_congruential.hpp>
 #include <boost/random/uniform_real.hpp>
 
-#include <vector>
+#include <list>
 
 #include "baswana_randomized_spanner.h"
+#include "edge_mask.h"
 
 using namespace ompl;
 
@@ -61,8 +62,7 @@ public:
     typedef boost::adjacency_matrix <
         boost::undirectedS,
         boost::no_property,
-        boost::property <boost::edge_weight_t, float>
-    > Graph;
+        boost::property <boost::edge_weight_t, float> > Graph;
 
     typedef boost::graph_traits<Graph>::edge_descriptor Edge;
 
@@ -70,38 +70,32 @@ public:
     {
         static boost::rand48 rand;
 
-        std::string name;
+        const std::string name;
         Graph graph;
         Graph spanner;
 
         GraphData(const std::string& name, const Graph& in_graph) :
             name(name), graph(in_graph), spanner(boost::num_vertices(graph))
         {
-            boost::property_map<Graph, boost::edge_weight_t>::type
-                weight = boost::get(boost::edge_weight, graph);
-
             // Randomize weights
             boost::uniform_real<double> weight_distribution(0.001, 1.0);
             boost::variate_generator<boost::rand48, boost::uniform_real<double> >
                 random_weights(rand, weight_distribution);
             boost::randomize_property<boost::edge_weight_t>(graph, random_weights);
 
-            // Create the spanner
-            std::vector<Edge> spanner_edges;
-            std::insert_iterator<std::vector<Edge> >
-                insert_edge(spanner_edges, spanner_edges.begin());
-            baswana_randomized_3_spanner(graph, insert_edge);
-            foreach(Edge e, spanner_edges)
-            {
-                const Graph::vertex_descriptor v1 = boost::source(e, graph);
-                const Graph::vertex_descriptor v2 = boost::target(e, graph);
-                const float w = boost::get(weight, e);
-                boost::add_edge(v1, v2, w, spanner);
-            }
+            // Find spanner edges
+            std::map<Edge, bool> spanner_map;
+            typedef boost::associative_property_map<std::map<Edge, bool> > spanner_t;
+            spanner_t spanner_edge(spanner_map);
+            baswana_randomized_3_spanner(graph, spanner_edge);
 
+            // Copy the edges to the (empty) spanner graph.
+            foreach(Edge e, boost::edges(graph))
+                boost::add_edge(boost::source(e, graph),
+                                boost::target(e, graph), spanner);
         }
     };
-    static std::vector<GraphData> graphs;
+    static std::list<GraphData> graphs;
 
     static void make_complete(Graph& G)
     {
@@ -150,7 +144,7 @@ public:
 
     }
 };
-std::vector<TestGraphs::GraphData> TestGraphs::graphs;
+std::list<TestGraphs::GraphData> TestGraphs::graphs;
 boost::rand48 TestGraphs::GraphData::rand;
 
 TEST_F(TestGraphs, spanner_has_fewer_or_equal_edges)

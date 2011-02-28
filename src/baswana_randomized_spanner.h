@@ -36,7 +36,6 @@ namespace detail
 
         typedef typename graph_traits<Graph>::edge_descriptor Edge;
         typename graph_traits<Graph>::edges_size_type m = num_edges(G);
-\
         function_requires<IncidenceGraphConcept<Graph> >();
 
         // Weights are edge properties and are comparable
@@ -52,7 +51,6 @@ namespace detail
         function_requires<ReadWritePropertyMapConcept<VertexColor, Vertex> >();
         typedef typename property_traits<VertexColor>::value_type VC_value;
         function_requires<EqualityComparableConcept<VC_value> >();
-\
         
         // Make a vertex a cluster center with a probability p_center
         unordered_set<Vertex> cluster_center;
@@ -135,6 +133,7 @@ namespace detail
         }
 
         // End of first phase.
+        
         foreach(Vertex v, v_prime)
         {
             foreach(Vertex c, cluster_center)
@@ -160,17 +159,12 @@ namespace detail
 } // namespace detail
 
 
-template <class Graph, class OutputIterator>
-void baswana_randomized_3_spanner(const Graph& G, OutputIterator spanner_edges)
+template <class Graph, class EdgeParity>
+void baswana_randomized_3_spanner(const Graph& G, EdgeParity spanner_edge)
 {
     typedef typename graph_traits<Graph>::vertex_descriptor Vertex;
-    typename graph_traits<Graph>::vertices_size_type n = num_vertices(G);
+    const typename graph_traits<Graph>::vertices_size_type n = num_vertices(G);
 
-    typedef typename graph_traits<Graph>::edge_descriptor Edge;
-    typename graph_traits<Graph>::edges_size_type m = num_edges(G);
-
-    typename boost::property_map<Graph, vertex_index_t>::const_type
-            vertex_id = get(vertex_index, G);
     typename boost::property_map<Graph, edge_weight_t>::const_type
             weight = get(edge_weight, G);
 
@@ -182,18 +176,8 @@ void baswana_randomized_3_spanner(const Graph& G, OutputIterator spanner_edges)
     tie(v_begin, v_end) = vertices(G);
     std::copy(v_begin, v_end, cluster.begin());
 
-    // Intialize the spanner edges to empty and create a property map
-    std::map<Edge, bool> spanner_map;
-    foreach(Edge e, edges(G))
-        spanner_map[e] = false;
-    associative_property_map<std::map<Edge, bool> > spanner_edge(spanner_map);
-
     detail::baswana_randomized_3_spanner_impl(G,
         weight, spanner_edge, &cluster[0], rand);
-
-    foreach(Edge e, edges(G))
-        if (get(spanner_edge, e) == true)
-            *spanner_edges++ = e;
 }
 
 }

@@ -8,8 +8,10 @@
 
 #include <iostream>
 #include <numeric>
+#include <map>
 
 #include "baswana_randomized_spanner.h"
+#include "edge_mask.h"
 
 using namespace ompl;
 
@@ -60,8 +62,8 @@ int main(int, char **)
     setup.setup();
     setup.print();
 
-    // Repeat for 10000 iterations
-    while (plannerData.states.size() < 50000)
+    // Repeat for some iterations
+    while (plannerData.states.size() < 1000)
     {
     	planner->as<geometric::BasicPRM>()->growRoadmap(0.5);
         planner->getPlannerData(plannerData);
@@ -74,25 +76,20 @@ int main(int, char **)
         std::cout << verts << ',' << edges << std::endl;
     }
 
-    geometric::KNearestPRMStar::Graph g =
-            planner->as<geometric::KNearestPRMStar>()->getGraph();
-    std::cout << "Total vertices: " << boost::num_vertices(g) << std::endl;
-    std::cout << "Total edges: " << boost::num_edges(g) << std::endl;
+    typedef geometric::KNearestPRMStar::Graph Graph;
+    typedef geometric::KNearestPRMStar::Edge Edge;
 
-    std::vector<geometric::KNearestPRMStar::Edge> spanner_edges;
-    std::insert_iterator<std::vector<geometric::KNearestPRMStar::Edge> >
-        insert_edge(spanner_edges, spanner_edges.begin());
-    baswana_randomized_3_spanner(g, insert_edge);
+    Graph G = planner->as<geometric::KNearestPRMStar>()->getGraph();
+    std::cout << "Graph vertices: " << boost::num_vertices(G) << std::endl;
+    std::cout << "Graph edges: " << boost::num_edges(G) << std::endl;
 
-    geometric::KNearestPRMStar::Graph s(boost::num_vertices(g));
-    foreach(geometric::KNearestPRMStar::Edge e, spanner_edges)
-    {
-        const geometric::KNearestPRMStar::Graph::vertex_descriptor v1 = boost::source(e, s);
-        const geometric::KNearestPRMStar::Graph::vertex_descriptor v2 = boost::target(e, s);
-        const float w = 1.0;// TODO boost::get(weight, e);
-        boost::add_edge(v1, v2, w, s);
-    }
-    std::cout << "Spanner edges: " << boost::num_edges(s) << std::endl;
+    std::map<Edge, bool> spanner_map;
+    typedef boost::associative_property_map<std::map<Edge, bool> > spanner_t;
+    spanner_t spanner_edge(spanner_map);
+    
+    boost::baswana_randomized_3_spanner(G, spanner_edge);
+    
+    std::cout << "Spanner edges: " << spanner_map.size() << std::endl;
     
     return 0;
 }
