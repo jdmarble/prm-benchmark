@@ -7,6 +7,9 @@ message("${PROJECT_SOURCE_DIR}/CMakeModules")
 find_package(OMPL REQUIRED)
 include_directories (${OMPL_INCLUDE_DIR})
 
+find_package(OMPLAPP REQUIRED)
+include_directories (${OMPLAPP_INCLUDE_DIR})
+
 find_package(PQP REQUIRED)
 include_directories (${PQP_INCLUDE_DIR})
 
@@ -20,6 +23,9 @@ add_executable(${PROJECT_NAME} ${PROJECT_SRC})
 
 target_link_libraries(${PROJECT_NAME}
 	${OMPL_LIBRARY}
+	${OMPLAPP_LIBRARY}
 	${PQP_LIBRARY}
 	${ASSIMP_LIBRARY}
 	)
+
+add_subdirectory(${PROJECT_SOURCE_DIR}/tests)
