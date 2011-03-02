@@ -83,6 +83,7 @@ public:
             boost::randomize_property<boost::edge_weight_t>(graph, random_weights);
 
             // Find spanner edges
+            std::cout << "\nRunning spanner algorithm on: " << name << std::endl;
             std::map<Edge, bool> spanner_map;
             typedef boost::associative_property_map<std::map<Edge, bool> > spanner_t;
             spanner_t spanner_edge(spanner_map);
@@ -123,6 +124,12 @@ public:
             Graph complete1k(1000);
             make_complete(complete1k);
             graphs.push_back(GraphData("complete1k", complete1k));
+        }
+
+        {// Large, very sparse graph
+            Graph sparse1k(1000);
+            boost::make_connected(sparse1k);
+            graphs.push_back(GraphData("sparse1k", sparse1k));
         }
 
         boost::rand48 rand_gen;
