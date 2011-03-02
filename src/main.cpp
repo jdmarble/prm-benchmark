@@ -11,7 +11,6 @@
 #include <map>
 
 #include "baswana_randomized_spanner.h"
-#include "edge_mask.h"
 
 using namespace ompl;
 
@@ -63,7 +62,7 @@ int main(int, char **)
     setup.print();
 
     // Repeat for some iterations
-    while (plannerData.states.size() < 1000)
+    while (plannerData.states.size() < 5000)
     {
     	planner->as<geometric::BasicPRM>()->growRoadmap(0.5);
         planner->getPlannerData(plannerData);
@@ -90,6 +89,7 @@ int main(int, char **)
     boost::baswana_randomized_3_spanner(G, spanner_edge);
     
     std::cout << "Spanner edges: " << spanner_map.size() << std::endl;
-    
+
+    Graph spanner;
     return 0;
 }

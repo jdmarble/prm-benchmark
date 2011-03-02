@@ -51,7 +51,6 @@
 #include <list>
 
 #include "baswana_randomized_spanner.h"
-#include "edge_mask.h"
 
 using namespace ompl;
 

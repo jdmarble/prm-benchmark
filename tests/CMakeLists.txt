@@ -25,6 +25,9 @@ if(OMPL_BUILD_TESTS)
     endmacro(add_ompl_python_test)
 
     # Tests
-    add_ompl_test(test_baswana_randomized_spanner baswana_randomized_spanner.cpp)
+    add_ompl_test(test_baswana_randomized_spanner
+    	               baswana_randomized_spanner.cpp)
+    add_ompl_test(test_set_member_predicate_property_map
+                       set_member_predicate_property_map.cpp)
     
 endif(OMPL_BUILD_TESTS)
