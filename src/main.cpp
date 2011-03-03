@@ -134,21 +134,23 @@ int main(int, char **)
     std::cout << "Graph vertices: " << n << std::endl;
     std::cout << "Graph edges: " << m << std::endl;
 
-    std::map<Edge, bool> spanner_map;
-    typedef boost::associative_property_map<std::map<Edge, bool> > spanner_t;
-    spanner_t spanner_edge(spanner_map);
-    
-    boost::baswana_randomized_3_spanner(G, spanner_edge);
-    
-    std::cout << "Spanner edges: " << spanner_map.size() << std::endl;
-
     Graph spanner(n);
-    foreach(Edge e, boost::edges(G))
-        if (boost::get(spanner_edge, e) == true)
-            boost::add_edge(boost::source(e, G), boost::target(e, G),
-                    boost::get(weight, e), spanner);
+    std::vector<Edge> edge_data;
+    baswana_randomized_3_spanner(G, std::back_inserter(edge_data));
+    foreach(Edge e, edge_data)
+    {
+        const Graph::vertex_descriptor v1 = boost::source(e, G);
+        const Graph::vertex_descriptor v2 = boost::target(e, G);
 
-
+        Edge e_p;
+        bool exists;        
+        boost::tie(e_p, exists) = boost::edge(v1, v2, spanner);
+        if (!exists)
+            boost::add_edge(v1, v2, weight[e], spanner);
+    }
+    
+    std::cout << "Spanner edges: " << boost::num_edges(spanner) << std::endl;
+   
     std::cout << "Graph stats..." << std::endl;
     std::vector<double> d_graph(n);
     pathStats(G, d_graph);
