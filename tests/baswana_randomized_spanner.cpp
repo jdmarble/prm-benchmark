@@ -145,45 +145,52 @@ boost::rand48 TestGraphs::GraphData::rand;
 TEST_F(TestGraphs, graph_edges_have_nonzero_weight)
 {
     foreach(const GraphData G, graphs)
+    {
+        SCOPED_TRACE(G.name);
         foreach(const Edge e, boost::edges(G.graph))
         {
             boost::property_map<Graph, boost::edge_weight_t>::const_type
                 weight = boost::get(boost::edge_weight, G.graph);
 
-            ASSERT_GT(weight[e], 0) << "Failed for graph: " << G.name;
+            ASSERT_GT(weight[e], 0);
         }
+    }
 }
 
 TEST_F(TestGraphs, spanner_edges_have_nonzero_weight)
 {
     foreach(const GraphData G, graphs)
+    {
+        SCOPED_TRACE(G.name);
         foreach(const Edge e, boost::edges(G.spanner))
         {
             boost::property_map<Graph, boost::edge_weight_t>::const_type
                 weight = boost::get(boost::edge_weight, G.spanner);
             
-            ASSERT_GT(weight[e], 0) << "Failed for graph: " << G.name;
+            ASSERT_GT(weight[e], 0);
         }
+    }
 }
 
 TEST_F(TestGraphs, spanner_has_fewer_or_equal_edges)
 {
     foreach(const GraphData G, graphs)
     {
-        EXPECT_LE(boost::num_edges(G.spanner), boost::num_edges(G.graph))
-                << "Failed for graph: " << G.name;
+        SCOPED_TRACE(G.name);
+        EXPECT_LE(boost::num_edges(G.spanner), boost::num_edges(G.graph));
     }
 }
 
 TEST_F(TestGraphs, spanner_has_one_component)
 {
     foreach(const GraphData G, graphs)
-    {        
+    {
+        SCOPED_TRACE(G.name);
         std::vector<int> component(num_vertices(G.spanner));
         const int num_components =
             boost::connected_components(G.spanner, &component[0]);
 
-        EXPECT_LE(num_components, 1) << "Failed for graph: " << G.name;
+        EXPECT_LE(num_components, 1);
     }
 }
 
@@ -192,10 +199,11 @@ TEST_F(TestGraphs, spanner_has_one_component)
 // expected.
 TEST_F(TestGraphs, spanner_property)
 {
-    const float stretch = 3.0;
-    
     foreach(const GraphData G, graphs)
     {
+        SCOPED_TRACE(G.name);
+
+        const float stretch = 3.0;
         if (boost::num_vertices(G.graph) > 0)
         {
             const unsigned int n = boost::num_vertices(G.graph);
@@ -217,10 +225,8 @@ TEST_F(TestGraphs, spanner_property)
             {
                 const float spanner_distance = d_s[v];
                 const float original_distance = d_g[v];
-                ASSERT_LE(spanner_distance, original_distance * stretch)
-                        << "Failed for graph: " << G.name;
-                ASSERT_GE(spanner_distance, original_distance)
-                        << "Failed for graph: " << G.name;
+                ASSERT_LE(spanner_distance, original_distance * stretch);
+                ASSERT_GE(spanner_distance, original_distance);
             }
         }
     }
