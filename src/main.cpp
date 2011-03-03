@@ -17,7 +17,7 @@ namespace bacc = boost::accumulators;
 #include <map>
 #include <numeric>
 
-#include "baswana_randomized_spanner.h"
+#include "baswana_randomized_3_spanner.h"
 
 using namespace ompl;
 

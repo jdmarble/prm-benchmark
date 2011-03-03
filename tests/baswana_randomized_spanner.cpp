@@ -51,7 +51,7 @@
 #include <iterator>
 #include <list>
 
-#include "baswana_randomized_spanner.h"
+#include "baswana_randomized_3_spanner.h"
 #include "set_member_predicate_property_map.hpp"
 
 using namespace ompl;
@@ -73,11 +73,11 @@ public:
 
         const std::string name;
         Graph graph;
-        Graph spanner;
+        std::vector<Graph> spanners;
 
         GraphData(const std::string& name, const Graph& in_graph,
             const bool complete = false, const unsigned int random = 0) :
-            name(name), graph(in_graph), spanner(boost::num_vertices(graph))
+            name(name), graph(in_graph)
         {
             if (complete)
                 make_complete(graph);
@@ -98,12 +98,16 @@ public:
             boost::randomize_property<boost::edge_weight_t>(graph, random_weights);
 
             // Find spanner edges
-            std::cout << "\nRunning spanner algorithm on: " << name << std::endl;
-            std::vector<Edge> edge_data;
-            baswana_randomized_3_spanner(graph, std::back_inserter(edge_data));
-            foreach(Edge e, edge_data)
-                boost::add_edge(boost::source(e, graph), boost::target(e, graph),
-                                weight[e], spanner);
+            {
+                Graph spanner(boost::num_vertices(graph));
+                std::cout << "\nRunning spanner algorithm on: " << name << std::endl;
+                std::vector<Edge> edge_data;
+                baswana_randomized_3_spanner(graph, std::back_inserter(edge_data));
+                foreach(Edge e, edge_data)
+                    boost::add_edge(boost::source(e, graph), boost::target(e, graph),
+                                    weight[e], spanner);
+                spanners.push_back(spanner);
+            }
         }
     };
     static std::list<GraphData> graphs;
@@ -142,13 +146,10 @@ public:
 std::list<TestGraphs::GraphData> TestGraphs::graphs;
 boost::rand48 TestGraphs::GraphData::rand;
 
-TEST_F(TestGraphs, graph_edges_have_nonzero_weight)
-{
-    foreach(const GraphData G, graphs)
-    {
-        SCOPED_TRACE(G.name);
-        foreach(const Edge e, boost::edges(G.graph))
-        {
+TEST_F(TestGraphs, graph_edges_have_nonzero_weight) {
+    foreach(const GraphData G, graphs) { SCOPED_TRACE(G.name);
+        foreach(const Edge e, boost::edges(G.graph)) {
+            
             boost::property_map<Graph, boost::edge_weight_t>::const_type
                 weight = boost::get(boost::edge_weight, G.graph);
 
@@ -157,55 +158,51 @@ TEST_F(TestGraphs, graph_edges_have_nonzero_weight)
     }
 }
 
-TEST_F(TestGraphs, spanner_edges_have_nonzero_weight)
-{
-    foreach(const GraphData G, graphs)
-    {
-        SCOPED_TRACE(G.name);
-        foreach(const Edge e, boost::edges(G.spanner))
-        {
-            boost::property_map<Graph, boost::edge_weight_t>::const_type
-                weight = boost::get(boost::edge_weight, G.spanner);
-            
-            ASSERT_GT(weight[e], 0);
+TEST_F(TestGraphs, spanner_edges_have_nonzero_weight) {
+    foreach(const GraphData G, graphs) { SCOPED_TRACE(G.name);
+        unsigned int k = 0;
+        foreach(const Graph spanner, G.spanners) { SCOPED_TRACE(k++);
+            foreach(const Edge e, boost::edges(spanner)) {
+
+                boost::property_map<Graph, boost::edge_weight_t>::const_type
+                    weight = boost::get(boost::edge_weight, spanner);
+
+                ASSERT_GT(weight[e], 0);
+            }
         }
     }
 }
 
-TEST_F(TestGraphs, spanner_has_fewer_or_equal_edges)
-{
-    foreach(const GraphData G, graphs)
-    {
-        SCOPED_TRACE(G.name);
-        EXPECT_LE(boost::num_edges(G.spanner), boost::num_edges(G.graph));
+TEST_F(TestGraphs, spanner_has_fewer_or_equal_edges) {
+    foreach(const GraphData G, graphs) { SCOPED_TRACE(G.name);
+        unsigned int k = 0;
+        foreach(const Graph spanner, G.spanners) { SCOPED_TRACE(k++);
+            EXPECT_LE(boost::num_edges(spanner), boost::num_edges(G.graph));
+        }
     }
 }
 
-TEST_F(TestGraphs, spanner_has_one_component)
-{
-    foreach(const GraphData G, graphs)
-    {
-        SCOPED_TRACE(G.name);
-        std::vector<int> component(num_vertices(G.spanner));
+TEST_F(TestGraphs, spanner_has_one_component) {
+    foreach(const GraphData G, graphs) { SCOPED_TRACE(G.name);
+        unsigned int k = 0;
+        foreach(const Graph spanner, G.spanners) { SCOPED_TRACE(k++);
+
+        std::vector<int> component(num_vertices(spanner));
         const int num_components =
-            boost::connected_components(G.spanner, &component[0]);
+            boost::connected_components(spanner, &component[0]);
 
         EXPECT_LE(num_components, 1);
+        }
     }
 }
 
 // Use Dijkstra's shortests paths from a random point in both the original
 // graph and the spanner. Then ensure that no path is lengthened further than
 // expected.
-TEST_F(TestGraphs, spanner_property)
-{
-    foreach(const GraphData G, graphs)
-    {
-        SCOPED_TRACE(G.name);
+TEST_F(TestGraphs, spanner_property) {
+    foreach(const GraphData G, graphs) { SCOPED_TRACE(G.name);
+        if (boost::num_vertices(G.graph) > 0) {
 
-        const float stretch = 3.0;
-        if (boost::num_vertices(G.graph) > 0)
-        {
             const unsigned int n = boost::num_vertices(G.graph);
             const Graph::vertex_descriptor start =
                 boost::random_vertex(G.graph, GraphData::rand);
@@ -216,17 +213,23 @@ TEST_F(TestGraphs, spanner_property)
             dijkstra_shortest_paths(G.graph, start,
                 boost::predecessor_map(&predecessor[0]).distance_map(&d_g[0]));
 
-            // Run Dijkstra's on the spanner.
-            std::vector<float> d_s(n);
-            dijkstra_shortest_paths(G.spanner, start,
-                boost::predecessor_map(&predecessor[0]).distance_map(&d_s[0]));
+            unsigned int k = 0;
+            foreach(const Graph spanner, G.spanners) { SCOPED_TRACE(k++);
 
-            foreach(Graph::vertex_descriptor v, boost::vertices(G.graph))
-            {
-                const float spanner_distance = d_s[v];
-                const float original_distance = d_g[v];
-                ASSERT_LE(spanner_distance, original_distance * stretch);
-                ASSERT_GE(spanner_distance, original_distance);
+                const float stretch = 3.0;
+
+                // Run Dijkstra's on the spanner.
+                std::vector<float> d_s(n);
+                dijkstra_shortest_paths(spanner, start,
+                    boost::predecessor_map(&predecessor[0]).distance_map(&d_s[0]));
+
+                foreach(Graph::vertex_descriptor v, boost::vertices(G.graph))
+                {
+                    const float spanner_distance = d_s[v];
+                    const float original_distance = d_g[v];
+                    ASSERT_LE(spanner_distance, original_distance * stretch);
+                    ASSERT_GE(spanner_distance, original_distance);
+                }
             }
         }
     }
