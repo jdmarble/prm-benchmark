@@ -52,6 +52,7 @@
 #include <list>
 
 #include "baswana_randomized_3_spanner.h"
+#include "baswana_randomized_spanner.h"
 #include "set_member_predicate_property_map.hpp"
 
 using namespace ompl;
@@ -63,7 +64,8 @@ public:
     typedef boost::adjacency_matrix <
         boost::undirectedS,
         boost::no_property,
-        boost::property <boost::edge_weight_t, float> > Graph;
+        boost::property <boost::edge_index_t, unsigned int,
+            boost::property <boost::edge_weight_t, float> > > Graph;
 
     typedef boost::graph_traits<Graph>::edge_descriptor Edge;
         
@@ -89,6 +91,13 @@ public:
 
             boost::make_connected(graph);
 
+            // Set edge indices
+            boost::property_map<Graph, boost::edge_index_t>::type
+                indices = get(boost::edge_index, graph);
+            unsigned int i = 0;
+            foreach(Edge e, boost::edges(graph))
+                indices[e] = i++;
+
             // Randomize weights
             boost::property_map<Graph, boost::edge_weight_t>::type
                 weight = get(boost::edge_weight, graph);
@@ -98,16 +107,37 @@ public:
             boost::randomize_property<boost::edge_weight_t>(graph, random_weights);
 
             // Find spanner edges
+            for(int cluster_heur = 0; cluster_heur <= 1; ++cluster_heur)
             {
                 Graph spanner(boost::num_vertices(graph));
-                std::cout << "\nRunning spanner algorithm on: " << name << std::endl;
+                std::cout << "\nRunning 3-spanner algorithm ";
+                std::cout << "(with" << (cluster_heur ? "out" : "") << " cluster heuristic) ";
+                std::cout << "on: " << name << std::endl;
+                
                 std::vector<Edge> edge_data;
-                baswana_randomized_3_spanner(graph, std::back_inserter(edge_data));
+                baswana_randomized_3_spanner(graph, std::back_inserter(edge_data), cluster_heur);
                 foreach(Edge e, edge_data)
                     boost::add_edge(boost::source(e, graph), boost::target(e, graph),
-                                    weight[e], spanner);
+                        Graph::edge_property_type(indices[e], weight[e]),
+                        spanner);
                 spanners.push_back(spanner);
             }
+
+            for (unsigned int k = 1; k <= 3; ++k)
+            {
+                std::cout << "\nRunning 2(" << k << ")+1 spanner algorithm ";
+                std::cout << " on: " << name << std::endl;
+
+                Graph spanner(boost::num_vertices(graph));
+                BaswanaSpanner<Graph> S(graph, k);
+                foreach(Edge e, S.calculateSpanner())
+                    boost::add_edge(boost::source(e, graph), boost::target(e, graph),
+                        Graph::edge_property_type(indices[e], weight[e]),
+                        spanner);
+                spanners.push_back(spanner);
+
+            }
+
         }
     };
     static std::list<GraphData> graphs;

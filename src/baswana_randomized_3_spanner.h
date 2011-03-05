@@ -5,8 +5,8 @@
  * Created on February 25, 2011, 10:26 PM
  */
 
-#ifndef BASWANA_RANDOMIZED_SPANNER_H
-#define	BASWANA_RANDOMIZED_SPANNER_H
+#ifndef BASWANA_RANDOMIZED_3_SPANNER_H
+#define	BASWANA_RANDOMIZED_3_SPANNER_H
 
 #include <ompl/util/RandomNumbers.h>
 
@@ -122,24 +122,7 @@ namespace detail
             function_requires<ReadWritePropertyMapConcept<Cluster, Vertex> >();
             typedef typename property_traits<Cluster>::value_type VC_value;
             function_requires<EqualityComparableConcept<VC_value> >();
-        }
-
-        {   // Make a vertex a cluster center with a probability p_center
-            const double p_center = 1 * 1.0 / sqrt((double)n);
-            unsigned int samples = 0;
-            foreach(Vertex v, vertices(G))
-                if (rand.uniform01() <= p_center)
-                {
-                    N[v] = v;
-                    ++samples;
-                }
-                else
-                {
-                    N[v] = null_vertex;
-                }
-
-            std::cout << "Sampled cluster centers:" << samples << std::endl;
-        }
+        }        
 
         // Where do the edges come from?
         unsigned int phase1a = 0;
@@ -208,16 +191,35 @@ namespace detail
 
 } // namespace detail
 
+template <typename Graph>
+struct compare_degree
+{
+    const Graph& G;
+    compare_degree(const Graph& G) : G(G) {}
+
+    typedef typename graph_traits<Graph>::vertex_descriptor Vertex;
+    bool operator()(const Vertex& v1, const Vertex& v2)
+    {
+        return out_degree(v1, G) < out_degree(v2, G);
+    }
+};
+
 template <class Graph, class SpannerEdge>
-void baswana_randomized_3_spanner(const Graph& G, SpannerEdge spanner_edge)
+void baswana_randomized_3_spanner(const Graph& G, SpannerEdge spanner_edge,
+        bool cluster_heur = false)
 {
     typedef typename graph_traits<Graph>::vertex_descriptor Vertex;
-    const typename graph_traits<Graph>::vertices_size_type n = num_vertices(G);
+    typedef typename graph_traits<Graph>::vertices_size_type vertices_size_t;
+    const vertices_size_t n = num_vertices(G);
+    Vertex null_vertex = graph_traits<Graph>::null_vertex();
+
     typedef typename graph_traits<Graph>::edge_descriptor Edge;
     const typename graph_traits<Graph>::edges_size_type m = num_edges(G);
 
     typename boost::property_map<Graph, edge_weight_t>::const_type
             weight = get(edge_weight, G);
+
+
 
     ompl::RNG rand;
     
@@ -225,6 +227,48 @@ void baswana_randomized_3_spanner(const Graph& G, SpannerEdge spanner_edge)
     typedef vector_property_map<Vertex> ClusterMap;
     ClusterMap N(n);
     foreach(Vertex v, vertices(G)) N[v] = v;
+
+    if (cluster_heur)
+    {
+        // Sort vertices, highest degree to lowest
+        std::vector<Vertex> degree_array;
+        boost::unordered_set<Vertex> cluster_adjacent;
+        degree_array.reserve(n);
+        foreach(Vertex v, vertices(G))
+            degree_array.push_back(v);
+
+        std::sort(degree_array.begin(), degree_array.end(), compare_degree<Graph>(G));
+        
+        unsigned int i = 0;
+        foreach(Vertex v, degree_array)
+            if(cluster_adjacent.find(v) != cluster_adjacent.end())
+                N[v] = null_vertex;
+            else
+            {
+                N[v] = v; // Make a cluster center
+                // Mark all connected nodes
+                cluster_adjacent.insert(v);
+                foreach(Edge e, out_edges(v, G))
+                    cluster_adjacent.insert(target(e, G));
+            }
+    }
+    else
+    {   // Make a vertex a cluster center with a probability p_center
+        const double p_center = 1.0 / sqrt((double)n);
+        unsigned int samples = 0;
+        foreach(Vertex v, vertices(G))
+            if (rand.uniform01() <= p_center)
+            {
+                N[v] = v;
+                ++samples;
+            }
+            else
+            {
+                N[v] = null_vertex;
+            }
+
+        std::cout << "Sampled cluster centers:" << samples << std::endl;
+    }
 
     detail::baswana_randomized_3_spanner_impl(G, weight, spanner_edge, N, rand);
 

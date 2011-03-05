@@ -78,23 +78,23 @@ int main(int, char **)
     base::PlannerData plannerData;
     
     // load the robot and the environment
-    std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/Easy_robot.dae";
-    std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/Easy_env.dae";
+    std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/cubicles_robot.dae";
+    std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/cubicles_env.dae";
     setup.setRobotMesh(robot_fname.c_str());
     setup.setEnvironmentMesh(env_fname.c_str());
 
     // define start state
     base::ScopedState<base::SE3StateManifold> start(setup.getSpaceInformation());
-    start->setX(-4.96);
-    start->setY(70.57);
-    start->setZ(40.62);
+    start->setX(390);
+    start->setY(280);
+    start->setZ(-450);
     start->rotation().setIdentity();
 
     // define goal state
     base::ScopedState<base::SE3StateManifold> goal(start);
-    goal->setX(200.49);
-    goal->setY(70.57);
-    goal->setZ(40.62);
+    goal->setX(100);
+    goal->setY(20);
+    goal->setZ(-100);
     goal->rotation().setIdentity();
 
     // set the start & goal states
@@ -128,6 +128,8 @@ int main(int, char **)
     
     const Graph::vertices_size_type n = boost::num_vertices(G);
     const Graph::edges_size_type m = boost::num_edges(G);
+    boost::property_map<Graph, boost::edge_index_t>::type
+            index = boost::get(boost::edge_index, G);
     boost::property_map<Graph, boost::edge_weight_t>::type
             weight = boost::get(boost::edge_weight, G);
     
@@ -136,17 +138,13 @@ int main(int, char **)
 
     Graph spanner(n);
     std::vector<Edge> edge_data;
-    baswana_randomized_3_spanner(G, std::back_inserter(edge_data));
+    baswana_randomized_3_spanner(G, std::back_inserter(edge_data), true);
     foreach(Edge e, edge_data)
     {
         const Graph::vertex_descriptor v1 = boost::source(e, G);
         const Graph::vertex_descriptor v2 = boost::target(e, G);
-
-        Edge e_p;
-        bool exists;        
-        boost::tie(e_p, exists) = boost::edge(v1, v2, spanner);
-        if (!exists)
-            boost::add_edge(v1, v2, weight[e], spanner);
+        const Graph::edge_property_type property(index[e], weight[e]);
+        boost::add_edge(v1, v2, property, spanner);
     }
     
     std::cout << "Spanner edges: " << boost::num_edges(spanner) << std::endl;

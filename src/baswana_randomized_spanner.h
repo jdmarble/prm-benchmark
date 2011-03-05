@@ -1,245 +1,191 @@
 /* 
- * File:   baswana_randomized_3_spanner.h
+ * File:   baswana_randomized_spanner.h
  * Author: jdmarble
  *
- * Created on February 25, 2011, 10:26 PM
+ * Created on March 3, 2011, 12:01 PM
  */
 
 #ifndef BASWANA_RANDOMIZED_SPANNER_H
 #define	BASWANA_RANDOMIZED_SPANNER_H
 
-#include <ompl/util/RandomNumbers.h>
-
 #define BOOST_NO_HASH
 #include <boost/config.hpp>
+
+#include <boost/bind.hpp>
+
 #include <boost/property_map/property_map.hpp>
 #include <boost/graph/graph_concepts.hpp>
 #include <boost/graph/named_function_params.hpp>
 #include <boost/graph/filtered_graph.hpp>
+
 #include <boost/foreach.hpp>
 #define foreach BOOST_FOREACH
 
-namespace boost
-{
+#include <boost/random/linear_congruential.hpp>
+#include <boost/random/uniform_01.hpp>
+#include <boost/random/variate_generator.hpp>
 
-namespace detail
-{
-    template <typename Graph, typename ClusterMap>
-    struct intercluster_subgraph {
-        intercluster_subgraph() { }
-        intercluster_subgraph(const Graph& G, const ClusterMap& N)
-            : G(&G), N(&N) { }
+#include <boost/unordered_set.hpp>
 
-        typedef typename graph_traits<Graph>::vertex_descriptor Vertex;
-        typedef typename graph_traits<Graph>::edge_descriptor Edge;
+using namespace boost;
+using namespace std;
 
-        bool operator()(const Edge& e) const {
-            const Vertex v1 = source(e, *G);
-            //if ((*N)[v1] == v1) return false;
 
-            const Vertex v2 = target(e, *G);
-            //if ((*N)[v2] == v2) return false;
-
-            return (*N)[v1] != (*N)[v2];
-        }
-
-        const Graph* G;
-        const ClusterMap* N;
-    };
-
-    // The second phase works only on G'=(V',E'), the subgraph of G where
-    // vertices in V' is either a sampled vertex (in R) or adjacent to one.
-    // E' are inter-cluster edges.
-    template <class Graph, class Weight, class SpannerEdge,
-        class Cluster, class Auxiliary>
-    void baswana_link_clusters_impl(const Graph& G, const Weight weight,
-            const Cluster N, SpannerEdge spanner_edge, Auxiliary A)
-    {
-        typedef typename graph_traits<Graph>::vertex_descriptor Vertex;
-        typename graph_traits<Graph>::vertices_size_type n = num_vertices(G);
-
-        typedef typename graph_traits<Graph>::edge_descriptor Edge;
-        typename graph_traits<Graph>::edges_size_type m = num_edges(G);
-
-        std::set<Vertex> non_null_edge;
-
-        unsigned int phase2 = 0;
-        foreach(Vertex v, vertices(G))
-        {
-            // Initialize each element of A to null.
-            non_null_edge.clear();
-
-            // Find the shortest edge between this node and other clusters.
-            foreach(Edge e, out_edges(v, G))
-            {
-                const Vertex w = target(e, G);
-                const Vertex x = N[w];
-                if (non_null_edge.find(x) == non_null_edge.end() ||
-                        weight[e] < weight[A[x]])
-                {
-                    A[x] = e;
-                    non_null_edge.insert(x);
-                }
-            }
-
-            // Add the shortest edges to the spanner.
-            foreach(Vertex u, non_null_edge)
-            {
-                *spanner_edge++ = A[u];
-                ++phase2;
-            }
-        }
-        std::cout << "Intercluster edges: " << phase2 << std::endl;
-    }
-
-    template <class Graph, class Weight, class SpannerEdge, class Cluster>
-    void baswana_randomized_3_spanner_impl(const Graph& G,
-            Weight weight, SpannerEdge spanner_edge, Cluster N,
-            ompl::RNG rand)
-    {
-        typedef typename graph_traits<Graph>::vertex_descriptor Vertex;
-        typename graph_traits<Graph>::vertices_size_type n = num_vertices(G);
-        Vertex null_vertex = graph_traits<Graph>::null_vertex();
-
-        typedef typename graph_traits<Graph>::edge_descriptor Edge;
-        typename graph_traits<Graph>::edges_size_type m = num_edges(G);
-
-        {   // Type contraints.
-            function_requires<IncidenceGraphConcept<Graph> >();
-
-            // Weights are edge properties and are comparable
-            function_requires<ReadablePropertyMapConcept<Weight, Edge> >();
-            typedef typename property_traits<Weight>::value_type W_value;
-            function_requires<ComparableConcept<W_value> >();
-
-            /* Mke this an output iterator
-            function_requires<WritablePropertyMapConcept<SpannerEdge, Edge> >();
-            typedef typename property_traits<SpannerEdge>::value_type EP_value;
-            function_requires<Convertible<EP_value, bool> >();
-            function_requires<Convertible<bool, EP_value> >();
-             */
-
-            function_requires<ReadWritePropertyMapConcept<Cluster, Vertex> >();
-            typedef typename property_traits<Cluster>::value_type VC_value;
-            function_requires<EqualityComparableConcept<VC_value> >();
-        }
-
-        {   // Make a vertex a cluster center with a probability p_center
-            const double p_center = 1 * 1.0 / sqrt((double)n);
-            unsigned int samples = 0;
-            foreach(Vertex v, vertices(G))
-                if (rand.uniform01() <= p_center)
-                {
-                    N[v] = v;
-                    ++samples;
-                }
-                else
-                {
-                    N[v] = null_vertex;
-                }
-
-            std::cout << "Sampled cluster centers:" << samples << std::endl;
-        }
-
-        // Where do the edges come from?
-        unsigned int phase1a = 0;
-        unsigned int phase1b = 0;
-        unsigned int phase1c = 0;
-
-        // Add each vertex to a cluster, or just keep all edges.
-        std::vector<Edge> center_neighbors;
-        foreach(Vertex v, vertices(G))
-        {
-            // Only process vertices that were not sampled.
-            if (N[v] == null_vertex)
-            {
-                // Find out if any neighbors are cluster centers.
-                center_neighbors.clear();
-                foreach(Edge e, out_edges(v, G))
-                    if (N[target(e, G)] == target(e, G))
-                        center_neighbors.push_back(e);
-
-                if (center_neighbors.empty())
-                {
-                    // No cluster center neighbors. Keep all edges.
-                    foreach(Edge e, out_edges(v, G))
-                    {
-                        *spanner_edge++ = e;
-                        ++phase1a;
-                    }
-                }
-                else
-                {
-                    // Find nearest neighbor in R.
-                    Edge closest = center_neighbors.front();
-                    double smallest_weight = weight[closest];
-                    foreach(Edge e, center_neighbors)
-                    {
-                        double w = weight[e];
-                        if (w < smallest_weight)
-                        {
-                            closest = e;
-                            smallest_weight = w;
-                        }
-                    }                    
-                    *spanner_edge++ = closest;
-                    ++phase1b;
-                    N[v] = target(closest, G);
-
-                    // Add edges with smaller weights to the nearest center.
-                    foreach(Edge e, out_edges(v, G))
-                    {
-                        double w = weight[e];
-                        if (w < smallest_weight)
-                        {
-                            *spanner_edge++ = e;
-                            ++phase1c;
-                        }
-                    }
-
-                }
-            }
-        }
-        std::cout << "Noncluster node edges: " << phase1a << std::endl;
-        std::cout << "Node to cluster center edges: " << phase1b << std::endl;
-        std::cout << "Other cluster edges: " << phase1c << std::endl;
-
-    }
-
-} // namespace detail
-
-template <class Graph, class SpannerEdge>
-void baswana_randomized_3_spanner(const Graph& G, SpannerEdge spanner_edge)
+template<class Graph>
+class BaswanaSpanner
 {
     typedef typename graph_traits<Graph>::vertex_descriptor Vertex;
-    const typename graph_traits<Graph>::vertices_size_type n = num_vertices(G);
     typedef typename graph_traits<Graph>::edge_descriptor Edge;
-    const typename graph_traits<Graph>::edges_size_type m = num_edges(G);
 
-    typename boost::property_map<Graph, edge_weight_t>::const_type
-            weight = get(edge_weight, G);
+    const Graph& G;
+    const unsigned int k;
+    typedef typename graph_traits<Graph>::vertices_size_type VertexSize;
+    VertexSize n;
+    typedef typename graph_traits<Graph>::edges_size_type EdgeSize;
+    EdgeSize m;
 
-    ompl::RNG rand;
+    const Vertex null_vertex;
+    const typename property_map<Graph, edge_weight_t>::const_type weight;
     
-    // Initialize each vertex cluster to itself.
-    typedef vector_property_map<Vertex> ClusterMap;
-    ClusterMap N(n);
-    foreach(Vertex v, vertices(G)) N[v] = v;
+    variate_generator<rand48, uniform_01<double> > uniform01;
+    typedef unordered_map<Vertex, Vertex> ClusterMap;
+    typedef typename ClusterMap::value_type Cluster;
+    ClusterMap clusters;
+    ClusterMap last_clusters;
+    unordered_set<Vertex> cluster_centers;
+    unordered_set<Vertex> last_cluster_centers;
+    unordered_set<Vertex> unsampled_vertices;
+    unordered_map<Vertex, Edge> lightest_cluster_edge;
+    list<Edge> spanner_edges;
 
-    detail::baswana_randomized_3_spanner_impl(G, weight, spanner_edge, N, rand);
+    struct EdgeHash : std::unary_function<Edge, size_t>
+    {
+        const Graph& G;
+        EdgeHash(const Graph& G) : G(G) {}
 
-    std::vector<Edge> A(n);
+        size_t operator()(const Edge& e) const
+        {
+            size_t seed = 0;
+            hash_combine(seed, min(source(e, G), target(e, G)));
+            hash_combine(seed, max(source(e, G), target(e, G)));
+            return seed;
+        }
+    };
+    
+    unordered_set<Edge, EdgeHash> E_;
 
-    // Discard all edges in E' that aren't connected to a center
-    // and are in the same cluster.
-    typedef typename detail::intercluster_subgraph< Graph, ClusterMap > ClusterFilter;
-    filtered_graph<Graph, ClusterFilter> G_prime(G, ClusterFilter(G, N));
+public:
 
-    detail::baswana_link_clusters_impl(G_prime, weight, N, spanner_edge, A);
+    BaswanaSpanner(const Graph& G, const unsigned int k) : G(G), k(k),
+    n(num_vertices(G)), m(num_edges(G)),
+    null_vertex(graph_traits<Graph>::null_vertex()),
+    weight(get(edge_weight, G)),
+    E_(m, EdgeHash(G)),
+    uniform01(rand48(), uniform_01<double>())
+    {
+        // Add all edges in E to E'
+        foreach(Edge e, edges(G))
+            E_.insert(e);
 
-}
+        // Initialize subgraphs to singletons
+        foreach(Vertex v, vertices(G))
+        {
+            clusters[v] = v;
+            cluster_centers.insert(v);
+        }
+    }
 
-}
+    const list<Edge>& calculateSpanner()
+    {
+        spanner_edges.clear();
+
+        for (unsigned int i = 1; i < k; ++i) // Perform k-1 iterations.
+        {
+            sampleClusters();
+            connectToSampled();
+            addEdgesToSpanner();
+        }
+
+        return spanner_edges;
+    }
+
+private:
+
+    void sampleClusters()
+    {
+        last_cluster_centers = cluster_centers;
+        cluster_centers.clear();
+
+        last_clusters = clusters;
+        clusters.clear();
+
+        unsampled_vertices.clear();
+
+        foreach (Vertex c, last_cluster_centers)
+            if (uniform01() > pow((double)n, -1.0/(double)k))
+                cluster_centers.insert(c);
+
+        foreach (Cluster vc, last_clusters)
+            if (cluster_centers.find(vc.second) != cluster_centers.end())
+                clusters[vc.first] = vc.second;
+            else
+                unsampled_vertices.insert(vc.first);
+    }
+
+    void connectToSampled()
+    {
+        lightest_cluster_edge.clear();
+        foreach(Vertex v, unsampled_vertices)
+        {
+            foreach(Edge e, out_edges(v, G))
+            {
+                const Vertex u = target(e, G);
+                // If this edge connects to a vertex in a sampled cluster.
+                if (unsampled_vertices.find(u) != unsampled_vertices.end() &&
+                        (lightest_cluster_edge.find(v) == lightest_cluster_edge.end()
+                        || weight[e] < weight[lightest_cluster_edge[v]])
+                   )
+                {
+                    lightest_cluster_edge[v] = e;
+                }
+            }
+        }
+    }
+
+    void moveAllE_vc(const Vertex& v)
+    {
+        unordered_map<Vertex, Edge> lightest;
+        foreach(Edge e, out_edges(v, G))
+        {
+            const Vertex c = last_clusters[target(e, G)];
+            if (E_.find(e) != E_.end() &&
+                (lightest.find(c) == lightest.end() ||
+                    weight[e] < weight[lightest[c]]))
+            {
+                lightest[c] = e;
+            }
+            E_.erase(e);
+        }
+        typedef pair<Vertex, Edge> VertexEdge;
+        foreach(VertexEdge ve, lightest)
+            spanner_edges.push_front(ve.second);
+    }
+
+    void addEdgesToSpanner()
+    {
+        foreach(Vertex v, unsampled_vertices)
+        {
+            if (lightest_cluster_edge.find(v) == lightest_cluster_edge.end())
+            {
+                moveAllE_vc(v);
+            }
+            else
+            {
+
+            }
+        }
+    }
+};
 
 #endif
 
