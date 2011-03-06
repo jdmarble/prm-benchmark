@@ -61,7 +61,9 @@ class TestGraphs : public ::testing::Test
 {
 public:
 
-    typedef boost::adjacency_matrix <
+    typedef boost::adjacency_list <
+        boost::setS, // Use a set for edges
+        boost::vecS, // Use a vector for the vertices
         boost::undirectedS,
         boost::no_property,
         boost::property <boost::edge_index_t, unsigned int,
@@ -123,13 +125,13 @@ public:
                 spanners.push_back(spanner);
             }
 
-            for (unsigned int k = 1; k <= 3; ++k)
+            for (unsigned int k = 2; k <= 5; ++k)
             {
-                std::cout << "\nRunning 2(" << k << ")+1 spanner algorithm ";
+                std::cout << "\nRunning 2(" << k << ")-1 spanner algorithm ";
                 std::cout << " on: " << name << std::endl;
 
                 Graph spanner(boost::num_vertices(graph));
-                BaswanaSpanner<Graph> S(graph, k);
+                BaswanaSpanner<Graph> S(graph, k, true);
                 foreach(Edge e, S.calculateSpanner())
                     boost::add_edge(boost::source(e, graph), boost::target(e, graph),
                         Graph::edge_property_type(indices[e], weight[e]),
@@ -161,16 +163,16 @@ public:
         graphs.push_back(GraphData("complete10", Graph(10), true));
         
         // Large, complete graph
-        graphs.push_back(GraphData("complete1k", Graph(1000), true));
+        graphs.push_back(GraphData("complete1h", Graph(100), true));
         
         // Large, very sparse graph
-        graphs.push_back(GraphData("sparse1k", Graph(1000)));
+        graphs.push_back(GraphData("sparse1h", Graph(1000)));
         
         // Small, random graph            
         graphs.push_back(GraphData("random10", Graph(10), false, 50));
         
         // Large, random graph
-        graphs.push_back(GraphData("random1k", Graph(1000), false, 50000));
+        graphs.push_back(GraphData("random1h", Graph(1000), false, 5000));
     }
 };
 std::list<TestGraphs::GraphData> TestGraphs::graphs;
