@@ -17,7 +17,8 @@ namespace bacc = boost::accumulators;
 #include <map>
 #include <numeric>
 
-#include "baswana_randomized_3_spanner.h"
+//#include "baswana_randomized_3_spanner.h"
+#include "baswana_randomized_spanner.h"
 
 using namespace ompl;
 
@@ -35,7 +36,8 @@ void distanceStats(const std::vector<double>& d)
         else
             acc(r);
     }
-    std::cout << "Warning! Disconnected nodes:" << disconnected << std::endl;
+    if (disconnected)
+        std::cout << "WARNING: Disconnected nodes:" << disconnected << std::endl;
 
     std::cout << "Mean distance from start: " << bacc::mean(acc) << std::endl;
     std::cout << "Max. distance from start: " << bacc::max(acc) << std::endl;
@@ -78,11 +80,12 @@ int main(int, char **)
     base::PlannerData plannerData;
     
     // load the robot and the environment
-    std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/cubicles_robot.dae";
-    std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/cubicles_env.dae";
+    std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/Twistycool_robot.dae";
+    std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/Twistycool_env.dae";
     setup.setRobotMesh(robot_fname.c_str());
     setup.setEnvironmentMesh(env_fname.c_str());
 
+    /*
     // define start state
     base::ScopedState<base::SE3StateManifold> start(setup.getSpaceInformation());
     start->setX(390);
@@ -99,7 +102,8 @@ int main(int, char **)
 
     // set the start & goal states
     setup.setStartAndGoalStates(start, goal);
-
+    */
+    
     // setting collision checking resolution to 1% of the space extent
     setup.getSpaceInformation()->setStateValidityCheckingResolution(0.01);
 
@@ -110,7 +114,7 @@ int main(int, char **)
     // Repeat for some iterations
     while (plannerData.states.size() < 5000)
     {
-    	planner->as<geometric::BasicPRM>()->growRoadmap(0.5);
+    	planner->as<geometric::BasicPRM>()->growRoadmap(1.0);
         planner->getPlannerData(plannerData);
 
         unsigned int verts = plannerData.states.size();
@@ -128,30 +132,31 @@ int main(int, char **)
     
     const Graph::vertices_size_type n = boost::num_vertices(G);
     const Graph::edges_size_type m = boost::num_edges(G);
-    boost::property_map<Graph, boost::edge_index_t>::type
-            index = boost::get(boost::edge_index, G);
     boost::property_map<Graph, boost::edge_weight_t>::type
             weight = boost::get(boost::edge_weight, G);
     
     std::cout << "Graph vertices: " << n << std::endl;
     std::cout << "Graph edges: " << m << std::endl;
+    std::cout << "Graph stats..." << std::endl;
+    std::vector<double> d_graph(n);
+    pathStats(G, d_graph);
 
     Graph spanner(n);
-    std::vector<Edge> edge_data;
-    baswana_randomized_3_spanner(G, std::back_inserter(edge_data), true);
-    foreach(Edge e, edge_data)
+    
+    //std::vector<Edge> edge_data;
+    //baswana_randomized_3_spanner(G, std::back_inserter(edge_data), true);
+    //foreach(Edge e, edge_data)
+
+    BaswanaSpanner<Graph> S(G, 5, true);
+    foreach(Edge e, S.calculateSpanner())
     {
         const Graph::vertex_descriptor v1 = boost::source(e, G);
         const Graph::vertex_descriptor v2 = boost::target(e, G);
-        const Graph::edge_property_type property(index[e], weight[e]);
+        const Graph::edge_property_type property(0, weight[e]);
         boost::add_edge(v1, v2, property, spanner);
     }
     
     std::cout << "Spanner edges: " << boost::num_edges(spanner) << std::endl;
-   
-    std::cout << "Graph stats..." << std::endl;
-    std::vector<double> d_graph(n);
-    pathStats(G, d_graph);
 
     std::cout << "Spanner stats..." << std::endl;
     std::vector<double> d_spanner(n);
