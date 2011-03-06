@@ -52,11 +52,12 @@ namespace detail
     // E' are inter-cluster edges.
     template <class Graph, class Weight, class SpannerEdge,
         class Cluster, class Auxiliary>
-    void baswana_link_clusters_impl(const Graph& G, const Weight weight,
-            const Cluster N, SpannerEdge spanner_edge, Auxiliary A)
+    void baswana_link_clusters_impl(const Graph& G, const Weight& weight,
+            const Cluster& N, SpannerEdge& spanner_edge, Auxiliary& A)
     {
         typedef typename graph_traits<Graph>::vertex_descriptor Vertex;
         typename graph_traits<Graph>::vertices_size_type n = num_vertices(G);
+        const Vertex null_vertex = graph_traits<Graph>::null_vertex();
 
         typedef typename graph_traits<Graph>::edge_descriptor Edge;
         typename graph_traits<Graph>::edges_size_type m = num_edges(G);
@@ -74,8 +75,9 @@ namespace detail
             {
                 const Vertex w = target(e, G);
                 const Vertex x = N[w];
-                if (non_null_edge.find(x) == non_null_edge.end() ||
-                        weight[e] < weight[A[x]])
+                if (x != null_vertex && (
+                        non_null_edge.find(x) == non_null_edge.end() ||
+                        weight[e] < weight[A[x]]))
                 {
                     A[x] = e;
                     non_null_edge.insert(x);
@@ -99,7 +101,7 @@ namespace detail
     {
         typedef typename graph_traits<Graph>::vertex_descriptor Vertex;
         typename graph_traits<Graph>::vertices_size_type n = num_vertices(G);
-        Vertex null_vertex = graph_traits<Graph>::null_vertex();
+        const Vertex null_vertex = graph_traits<Graph>::null_vertex();
 
         typedef typename graph_traits<Graph>::edge_descriptor Edge;
         typename graph_traits<Graph>::edges_size_type m = num_edges(G);
@@ -272,7 +274,7 @@ void baswana_randomized_3_spanner(const Graph& G, SpannerEdge spanner_edge,
 
     detail::baswana_randomized_3_spanner_impl(G, weight, spanner_edge, N, rand);
 
-    std::vector<Edge> A(n);
+    vector_property_map<Edge> A(n);
 
     // Discard all edges in E' that aren't connected to a center
     // and are in the same cluster.
@@ -280,7 +282,6 @@ void baswana_randomized_3_spanner(const Graph& G, SpannerEdge spanner_edge,
     filtered_graph<Graph, ClusterFilter> G_prime(G, ClusterFilter(G, N));
 
     detail::baswana_link_clusters_impl(G_prime, weight, N, spanner_edge, A);
-
 }
 
 }
