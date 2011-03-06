@@ -244,9 +244,10 @@ TEST_F(TestGraphs, spanner_property) {
                 boost::predecessor_map(&predecessor[0]).distance_map(&d_g[0]));
 
             unsigned int k = 0;
-            foreach(const Graph spanner, G.spanners) { SCOPED_TRACE(k++);
-
-                const float stretch = 3.0;
+            foreach(const Graph spanner, G.spanners) {
+                const float stretch = k<2 ? 3.0 : 2*k-1;
+                SCOPED_TRACE(testing::Message() <<
+                        "k: " << k << " stretch:" << stretch);
 
                 // Run Dijkstra's on the spanner.
                 std::vector<float> d_s(n);
@@ -260,6 +261,7 @@ TEST_F(TestGraphs, spanner_property) {
                     ASSERT_LE(spanner_distance, original_distance * stretch);
                     ASSERT_GE(spanner_distance, original_distance);
                 }
+                ++k;
             }
         }
     }
