@@ -113,7 +113,7 @@ public:
             {
                 Graph spanner(boost::num_vertices(graph));
                 std::cout << "\nRunning 3-spanner algorithm ";
-                std::cout << "(with" << (cluster_heur ? "out" : "") << " cluster heuristic) ";
+                std::cout << "(with" << (cluster_heur ? "" : "out") << " cluster heuristic) ";
                 std::cout << "on: " << name << std::endl;
                 
                 std::vector<Edge> edge_data;
