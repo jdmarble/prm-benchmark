@@ -16,6 +16,9 @@ include_directories (${PQP_INCLUDE_DIR})
 find_package(ASSIMP REQUIRED)
 include_directories (${ASSIMP_INCLUDE_DIR})
 
+find_package(Boost REQUIRED program_options)
+include_directories (${Boost_INCLUDE_DIRS})
+
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 include_directories (${PROJECT_SOURCE_DIR}/include)
 file(GLOB_RECURSE PROJECT_SRC src/*.cpp)
@@ -26,6 +29,7 @@ target_link_libraries(${PROJECT_NAME}
 	${OMPLAPP_LIBRARY}
 	${PQP_LIBRARY}
 	${ASSIMP_LIBRARY}
+	${Boost_PROGRAM_OPTIONS_LIBRARY}
 	)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/tests)

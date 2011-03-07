@@ -10,6 +10,10 @@
 #include <boost/accumulators/statistics/max.hpp>
 #include <boost/accumulators/statistics/mean.hpp>
 namespace bacc = boost::accumulators;
+
+#include <boost/program_options.hpp>
+namespace po = boost::program_options;
+
 #include <boost/graph/dijkstra_shortest_paths.hpp>
 
 #include <iostream>
@@ -69,7 +73,8 @@ unsigned int accumSizes(unsigned int acc, const std::vector<T>& vec)
     return vec.size() + acc;
 }
 
-int main(int, char **)
+void experiment(const std::string& environment, const unsigned int target_n,
+    const unsigned int k, const bool heuristic)
 {
     // plan in SE3
     app::SE3RigidBodyPlanning setup;
@@ -80,8 +85,10 @@ int main(int, char **)
     base::PlannerData plannerData;
     
     // load the robot and the environment
-    std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/Twistycool_robot.dae";
-    std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR) + "/Twistycool_env.dae";
+    std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR)
+            + "/" + environment + "_robot.dae";
+    std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR)
+            + "/" + environment + "_env.dae";
     setup.setRobotMesh(robot_fname.c_str());
     setup.setEnvironmentMesh(env_fname.c_str());
 
@@ -112,7 +119,7 @@ int main(int, char **)
     setup.print();
 
     // Repeat for some iterations
-    while (plannerData.states.size() < 5000)
+    while (plannerData.states.size() < target_n)
     {
     	planner->as<geometric::BasicPRM>()->growRoadmap(1.0);
         planner->getPlannerData(plannerData);
@@ -147,7 +154,7 @@ int main(int, char **)
     //baswana_randomized_3_spanner(G, std::back_inserter(edge_data), true);
     //foreach(Edge e, edge_data)
 
-    BaswanaSpanner<Graph> S(G, 5, true);
+    BaswanaSpanner<Graph> S(G, k, heuristic);
     foreach(Edge e, S.calculateSpanner())
     {
         const Graph::vertex_descriptor v1 = boost::source(e, G);
@@ -178,6 +185,33 @@ int main(int, char **)
             ++spanner_iter;
         }
     distanceStats(d_diff);
-    
-    return 0;
+}
+
+int main(int argc, char* argv[])
+{
+    // Declare the supported options.
+    po::options_description desc("Allowed options");
+    desc.add_options()
+        ("help", "produce help message")
+        ("environment", po::value<std::string>(), "environment name")
+        ("n", po::value<unsigned int>(), "number of nodes in graph")
+        ("k", po::value<unsigned int>(), "create a 2k-1 spanner")
+        ("heuristic", po::value<bool>(), "use cluster heuristic")
+    ;
+
+    po::variables_map vm;
+    po::store(po::parse_command_line(argc, argv, desc), vm);
+    po::notify(vm);
+
+    if (vm.count("help")) {
+        cout << desc << "\n";
+        return 1;
+    }
+
+    experiment(
+            vm["environment"].as<std::string>(),
+            vm["n"].as<unsigned int>(),
+            vm["k"].as<unsigned int>(),
+            vm["heuristic"].as<bool>()
+    );
 }
