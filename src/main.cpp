@@ -1,6 +1,6 @@
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/manifolds/SE3StateManifold.h>
-#include <ompl/geometric/planners/prm/KNearestPRMStar.h>
+#include <ompl/geometric/planners/prm/BGL_PRM.h>
 #include <ompl/geometric/SimpleSetup.h>
 #include <ompl/config.h>
 #include <omplapp/SE3RigidBodyPlanning.h>
@@ -80,7 +80,7 @@ void experiment(const std::string& environment, const unsigned int target_n,
     app::SE3RigidBodyPlanning setup;
     
     // create a planner for the defined space
-    base::PlannerPtr planner(new geometric::KNearestPRMStar(setup.getSpaceInformation()));
+    base::PlannerPtr planner(new geometric::BGL_PRM(setup.getSpaceInformation()));
     setup.setPlanner(planner);
     base::PlannerData plannerData;
     
@@ -121,7 +121,7 @@ void experiment(const std::string& environment, const unsigned int target_n,
     // Repeat for some iterations
     while (plannerData.states.size() < target_n)
     {
-    	planner->as<geometric::BasicPRM>()->growRoadmap(1.0);
+    	planner->as<geometric::BGL_PRM>()->growRoadmap(1.0);
         planner->getPlannerData(plannerData);
 
         unsigned int verts = plannerData.states.size();
@@ -132,14 +132,14 @@ void experiment(const std::string& environment, const unsigned int target_n,
         std::cout << verts << ',' << edges << std::endl;
     }
 
-    typedef geometric::KNearestPRMStar::Graph Graph;
-    typedef geometric::KNearestPRMStar::Edge Edge;
+    typedef geometric::BGL_PRM::Graph Graph;
+    typedef geometric::BGL_PRM::Edge Edge;
 
-    Graph G = planner->as<geometric::KNearestPRMStar>()->getGraph();
+    const Graph& G = planner->as<geometric::BGL_PRM>()->getGraph();
     
     const Graph::vertices_size_type n = boost::num_vertices(G);
     const Graph::edges_size_type m = boost::num_edges(G);
-    boost::property_map<Graph, boost::edge_weight_t>::type
+    boost::property_map<Graph, boost::edge_weight_t>::const_type
             weight = boost::get(boost::edge_weight, G);
     
     std::cout << "Graph vertices: " << n << std::endl;
@@ -148,29 +148,18 @@ void experiment(const std::string& environment, const unsigned int target_n,
     std::vector<double> d_graph(n);
     pathStats(G, d_graph);
 
-    Graph spanner(n);
-    
-    //std::vector<Edge> edge_data;
-    //baswana_randomized_3_spanner(G, std::back_inserter(edge_data), true);
-    //foreach(Edge e, edge_data)
-
     BaswanaSpanner<Graph> S(G, k, heuristic);
-    foreach(Edge e, S.calculateSpanner())
-    {
-        const Graph::vertex_descriptor v1 = boost::source(e, G);
-        const Graph::vertex_descriptor v2 = boost::target(e, G);
-        const Graph::edge_property_type property(0, weight[e]);
-        boost::add_edge(v1, v2, property, spanner);
-    }
+    const std::list<Edge> spannerEdges = S.calculateSpanner();
+    planner->as<geometric::BGL_PRM>()->edgeSetIntersect(spannerEdges);
     
-    std::cout << "Spanner edges: " << boost::num_edges(spanner) << std::endl;
+    std::cout << "Spanner edges: " << boost::num_edges(G) << std::endl;
 
     std::cout << "Spanner stats..." << std::endl;
     std::vector<double> d_spanner(n);
-    pathStats(spanner, d_spanner);
+    pathStats(G, d_spanner);
 
     std::cout << "Difference stats..." << std::endl;
-    // d_diff = abs(d_graph - d_spanner)
+    // Effectively: d_diff = abs(d_graph - d_spanner)
     std::vector<double> d_diff(n);
     std::vector<double>::const_iterator graph_iter(d_graph.begin());
     std::vector<double>::const_iterator spanner_iter(d_spanner.begin());
