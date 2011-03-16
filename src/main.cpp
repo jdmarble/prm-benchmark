@@ -1,22 +1,18 @@
-#include <ompl/benchmark/Benchmark.h>
+#include <ompl/config.h>
+#include <ompl/util/RandomNumbers.h>
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/manifolds/SE3StateManifold.h>
 #include <ompl/geometric/planners/prm/BGL_PRM.h>
 #include <ompl/geometric/SimpleSetup.h>
-#include <ompl/config.h>
-#include <omplapp/SE3RigidBodyPlanning.h>
+#include <ompl/benchmark/Benchmark.h>
 
-#include <boost/accumulators/accumulators.hpp>
-#include <boost/accumulators/statistics/stats.hpp>
-#include <boost/accumulators/statistics/max.hpp>
-#include <boost/accumulators/statistics/mean.hpp>
-namespace bacc = boost::accumulators;
+#include <omplapp/SE3RigidBodyPlanning.h>
 
 #include <boost/program_options.hpp>
 namespace po = boost::program_options;
 
 #include <boost/graph/dijkstra_shortest_paths.hpp>
-#include <boost/graph/random.hpp>
+#include <boost/property_map/vector_property_map.hpp>
 
 #include <iostream>
 #include <limits>
@@ -49,7 +45,6 @@ struct Experiment {
     const Graph& G;
 
     Graph::vertices_size_type n;
-    Graph::vertices_size_type n_spanner;
 
     boost::shared_ptr<geometric::BGL_PRM> spannerPlanner;
     base::PlannerData spannerPlannerData;
@@ -57,7 +52,7 @@ struct Experiment {
     const Graph& S;
        
     /** For picking random vertices */
-    boost::rand48 randGen;
+    RNG rng_;
 
     const std::string environment_;
 
@@ -113,18 +108,20 @@ struct Experiment {
         BaswanaSpanner<Graph> spannerCalc(S, k_, heuristic_);
         const std::list<Edge> spannerEdges = spannerCalc.calculateSpanner();
         spannerPlanner->edgeSetIntersect(spannerEdges);
-        n_spanner = boost::num_vertices(S);
+        cerr << "spanner edges:" << boost::num_edges(S) << endl;
     }
 
     void print_stats()
-    {        
-        std::vector<double> d_graph(n);
-        std::vector<double> d_spanner(n);
-
+    {
         for (int i = 0; i < 10; ++i)
         {
-            pathStats(G, d_graph);
-            pathStats(S, d_spanner);
+            Vertex start = rng_.uniformInt(*(boost::vertices(G).first), n);
+
+            boost::vector_property_map<double> d_graph(n);
+            pathStats(G, d_graph, start);
+
+            boost::vector_property_map<double> d_spanner(n);
+            pathStats(S, d_spanner, start);
 
             foreach(Vertex v, boost::vertices(G))
             {
@@ -135,17 +132,14 @@ struct Experiment {
         }
     }
 
-    void pathStats(const Graph& G, std::vector<double>& d)
-    {
-        n = boost::num_vertices(G);
-
-        Vertex start = boost::random_vertex(G, randGen);
-
+    template<class DistanceMap>
+    void pathStats(const Graph& g, DistanceMap& d, const Vertex start)
+    {        
         // Need scratch vector for Dijkstra's
-        std::vector<Vertex> predecessor(n);
+        boost::vector_property_map<double> predecessor(n);
          
-        dijkstra_shortest_paths(G, start,
-            boost::predecessor_map(&predecessor[0]).distance_map(&d[0]));
+        dijkstra_shortest_paths(g, start,
+            boost::predecessor_map(predecessor).distance_map(d));
     }
 
     void benchmark()
