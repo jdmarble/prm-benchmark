@@ -1,3 +1,4 @@
+#include <ompl/benchmark/Benchmark.h>
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/manifolds/SE3StateManifold.h>
 #include <ompl/geometric/planners/prm/BGL_PRM.h>
@@ -36,28 +37,44 @@ unsigned int accumSizes(unsigned int acc, const std::vector<T>& vec)
 
 struct Experiment {
 
-    app::SE3RigidBodyPlanning setup;
-    boost::shared_ptr<geometric::BGL_PRM> planner;
-    base::PlannerData plannerData;
-
     typedef geometric::BGL_PRM::Graph Graph;
     typedef geometric::BGL_PRM::Vertex Vertex;
     typedef geometric::BGL_PRM::Edge Edge;
 
-    /** Current graph in the planner */
+    app::SE3RigidBodyPlanning setup;
+    
+    boost::shared_ptr<geometric::BGL_PRM> graphPlanner;
+    base::PlannerData graphPlannerData;
+    /** Original graph */
     const Graph& G;
 
-    /** Copy of graph as it was before spanner */
-    Graph originalGraph;
+    Graph::vertices_size_type n;
+    Graph::vertices_size_type n_spanner;
 
+    boost::shared_ptr<geometric::BGL_PRM> spannerPlanner;
+    base::PlannerData spannerPlannerData;
+    /** Spanner subgraph */
+    const Graph& S;
+       
     /** For picking random vertices */
     boost::rand48 randGen;
 
-    Experiment(const std::string& environment) :
-        planner(new geometric::BGL_PRM(setup.getSpaceInformation())),
-        G(planner->getGraph())
+    const std::string environment_;
+
+    const unsigned int k_;
+
+    const bool heuristic_;
+
+    Experiment(const std::string& environment,
+               const unsigned int k,
+               const bool heuristic) :
+        graphPlanner(new geometric::BGL_PRM(setup.getSpaceInformation())),
+        G(graphPlanner->getGraph()),
+        spannerPlanner(new geometric::BGL_PRM(setup.getSpaceInformation())),
+        S(spannerPlanner->getGraph()),
+        environment_(environment), k_(k), heuristic_(heuristic)
     {
-        setup.setPlanner(planner);
+        setup.setPlanner(graphPlanner);
         
         // load the robot and the environment
         std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR)
@@ -75,57 +92,52 @@ struct Experiment {
     void explore_space(const unsigned int target_n)
     {
         // Repeat for at least target_n milestones have been added.
-        while (plannerData.states.size() < target_n)
+        while (graphPlannerData.states.size() < target_n)
         {
-            planner->as<geometric::BGL_PRM>()->growRoadmap(1.0);
-            planner->getPlannerData(plannerData);
+            graphPlanner->growRoadmap(1.0);
+            graphPlanner->getPlannerData(graphPlannerData);
 
-            unsigned int verts = plannerData.states.size();
+            unsigned int verts = graphPlannerData.states.size();
             unsigned int edges =
-                std::accumulate(plannerData.edges.begin(), plannerData.edges.end(),
+                std::accumulate(graphPlannerData.edges.begin(), graphPlannerData.edges.end(),
                     0, accumSizes<unsigned int>) / 2;
 
             std::cerr << verts << ',' << edges << std::endl;
         }
-
-        originalGraph = planner->getGraph();
+        n = boost::num_vertices(G);
     }
 
-    void make_spanner(const unsigned int k, const bool heuristic)
+    void make_spanner()
     {
-        BaswanaSpanner<Graph> S(G, k, heuristic);
-        const std::list<Edge> spannerEdges = S.calculateSpanner();
-        planner->edgeSetIntersect(spannerEdges);
+        spannerPlanner->setGraph(graphPlanner->getGraph());
+        BaswanaSpanner<Graph> spannerCalc(S, k_, heuristic_);
+        const std::list<Edge> spannerEdges = spannerCalc.calculateSpanner();
+        spannerPlanner->edgeSetIntersect(spannerEdges);
+        n_spanner = boost::num_vertices(S);
     }
 
     void print_stats()
-    {
-        const Graph::vertices_size_type n = boost::num_vertices(G);
+    {        
         std::vector<double> d_graph(n);
         std::vector<double> d_spanner(n);
 
-        std::cout << "Graph vertices: " << n << std::endl;
-        std::cout << "Graph edges: " << boost::num_edges(originalGraph) << std::endl;
-        std::cout << "Graph stats..." << std::endl;
-        pathStats(originalGraph, d_graph);
-
-        std::cout << "Spanner stats..." << std::endl;
-        std::cout << "Spanner edges: " << boost::num_edges(G) << std::endl;
-        pathStats(G, d_spanner);
-
         for (int i = 0; i < 10; ++i)
         {
-            std::cout << "Difference stats..." << std::endl;
+            pathStats(G, d_graph);
+            pathStats(S, d_spanner);
+
             foreach(Vertex v, boost::vertices(G))
             {
-                std::cout << d_graph[v] << ',' << d_spanner[v]/d_graph[v] << std::endl;
+                std::cout << k_ << ',' << heuristic_ << ',' << i << ',';
+                std::cout << d_graph[v] << ',' << d_spanner[v];
+                std::cout << std::endl;
             }
         }
     }
 
     void pathStats(const Graph& G, std::vector<double>& d)
     {
-        Graph::vertices_size_type n = boost::num_vertices(G);
+        n = boost::num_vertices(G);
 
         Vertex start = boost::random_vertex(G, randGen);
 
@@ -136,10 +148,24 @@ struct Experiment {
             boost::predecessor_map(&predecessor[0]).distance_map(&d[0]));
     }
 
+    void benchmark()
+    {
+        // create the benchmark object and add all the planners we'd like to run
+        const std::string benchmark_name = environment_;
+        Benchmark b(setup, benchmark_name);
+        b.addPlanner(graphPlanner);
+        b.addPlanner(spannerPlanner);
+
+        b.benchmark(1, 10000, 50, false);
+        b.saveResultsToFile();
+    }
 };
 
 int main(int argc, char* argv[])
 {
+    // Turn off logging to std::out. Need the stream for file output.
+    msg::noOutputHandler();
+
     // Declare the supported options.
     po::options_description desc("Allowed options");
     desc.add_options()
@@ -159,9 +185,14 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    Experiment exp(vm["environment"].as<std::string>());
+    Experiment exp(
+        vm["environment"].as<std::string>(),
+        vm["k"].as<unsigned int>(),
+        vm["heuristic"].as<bool>()
+    );
     exp.explore_space(vm["n"].as<unsigned int>());
-    exp.make_spanner(vm["k"].as<unsigned int>(), vm["heuristic"].as<bool>());
+    exp.make_spanner();
     exp.print_stats();
-   
+    
+    //exp.benchmark();
 }
