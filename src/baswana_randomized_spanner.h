@@ -127,7 +127,6 @@ public:
 
         for (unsigned int i = 0; i < k/2; ++i) // Perform floor(k/2) iterations.
         {
-            cout << "\nIteration - " << i+1 << endl;
             step3a = step3b = 0;
 
             sampleClusters();
@@ -235,15 +234,13 @@ private:
                 if (uniform01() < pow((double)n, -1.0/(double)k))
                     cluster_centers.insert(c);         
         }
-        cout << "Sampled clusters:" << cluster_centers.size() << endl;
 
         // Copy the sampled clusters from the last clusters
         foreach (Cluster vc, last_clusters)
             if (in(cluster_centers, vc.second))
                 clusters[vc.first] = vc.second;
             else
-                unsampled_vertices.insert(vc.first);
-        cout << "Vertices not in sampled clusters:" << unsampled_vertices.size() << endl;
+                unsampled_vertices.insert(vc.first);        
     }
 
 
@@ -265,8 +262,6 @@ private:
                 }
             }
         }
-        cout << "Unsampled vertices adjacent to sampled clusters:" <<
-                lightest_cluster_edge.size() << endl;
     }
 
     void addEdgesToSpanner()
@@ -282,8 +277,6 @@ private:
                 connectCluster(v);
             }
         }
-        cout << "Edges added in step3a:" << step3a << endl;
-        cout << "Edges added in step3b:" << step3b << endl;
     }
 
     void moveAllE_vc(const Vertex& v)
@@ -388,8 +381,6 @@ private:
 
     void clusterClusterJoining()
     {
-        const unsigned int preCluster = spanner_edges.size();
-
         if(k % 2) // k is odd
         {
             oddClusterClusterJoining();
@@ -398,9 +389,6 @@ private:
         {
             evenClusterClusterJoining();
         }
-
-        cout << "Intercluster edges added:";
-        cout << spanner_edges.size()-preCluster << endl;
     }
 
     void oddClusterClusterJoining()

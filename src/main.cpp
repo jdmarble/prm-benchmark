@@ -15,6 +15,7 @@ namespace bacc = boost::accumulators;
 namespace po = boost::program_options;
 
 #include <boost/graph/dijkstra_shortest_paths.hpp>
+#include <boost/graph/random.hpp>
 
 #include <iostream>
 #include <limits>
@@ -26,46 +27,6 @@ namespace po = boost::program_options;
 
 using namespace ompl;
 
-void distanceStats(const std::vector<double>& d)
-{
-    bacc::accumulator_set<
-        double,
-        bacc::features< bacc::tag::max, bacc::tag::mean > > acc;
-    unsigned int disconnected = 0;
-    foreach(double r, d)
-    {
-        // Count disconnected components
-        if (r == std::numeric_limits<double>::max())
-            ++disconnected;
-        else
-            acc(r);
-    }
-    if (disconnected)
-        std::cout << "WARNING: Disconnected nodes:" << disconnected << std::endl;
-
-    std::cout << "Mean distance from start: " << bacc::mean(acc) << std::endl;
-    std::cout << "Max. distance from start: " << bacc::max(acc) << std::endl;
-}
-
-template <class Graph>
-void pathStats(const Graph& G, std::vector<double>& d)
-{
-    typedef typename boost::graph_traits<Graph>::vertex_descriptor Vertex;
-    typename boost::graph_traits<Graph>::vertices_size_type
-        n = boost::num_vertices(G);
-
-    // Arbitrarily select the first vertex.
-    Vertex start = *boost::vertices(G).first;
-
-    // Need scratch vector for Dijkstra's
-    std::vector<Vertex> predecessor(n);
-    dijkstra_shortest_paths(G, start,
-        boost::predecessor_map(&predecessor[0]).distance_map(&d[0]));
-
-    // Calculate statistics
-    distanceStats(d);
-}
-
 // For counting the size of a nested vector.
 template <typename T>
 unsigned int accumSizes(unsigned int acc, const std::vector<T>& vec)
@@ -73,108 +34,109 @@ unsigned int accumSizes(unsigned int acc, const std::vector<T>& vec)
     return vec.size() + acc;
 }
 
-void experiment(const std::string& environment, const unsigned int target_n,
-    const unsigned int k, const bool heuristic)
-{
-    // plan in SE3
+struct Experiment {
+
     app::SE3RigidBodyPlanning setup;
-    
-    // create a planner for the defined space
-    base::PlannerPtr planner(new geometric::BGL_PRM(setup.getSpaceInformation()));
-    setup.setPlanner(planner);
+    boost::shared_ptr<geometric::BGL_PRM> planner;
     base::PlannerData plannerData;
-    
-    // load the robot and the environment
-    std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR)
-            + "/" + environment + "_robot.dae";
-    std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR)
-            + "/" + environment + "_env.dae";
-    setup.setRobotMesh(robot_fname.c_str());
-    setup.setEnvironmentMesh(env_fname.c_str());
-
-    /*
-    // define start state
-    base::ScopedState<base::SE3StateManifold> start(setup.getSpaceInformation());
-    start->setX(390);
-    start->setY(280);
-    start->setZ(-450);
-    start->rotation().setIdentity();
-
-    // define goal state
-    base::ScopedState<base::SE3StateManifold> goal(start);
-    goal->setX(100);
-    goal->setY(20);
-    goal->setZ(-100);
-    goal->rotation().setIdentity();
-
-    // set the start & goal states
-    setup.setStartAndGoalStates(start, goal);
-    */
-    
-    // setting collision checking resolution to 1% of the space extent
-    setup.getSpaceInformation()->setStateValidityCheckingResolution(0.01);
-
-    // we call setup just so print() can show more information
-    setup.setup();
-    setup.print();
-
-    // Repeat for some iterations
-    while (plannerData.states.size() < target_n)
-    {
-    	planner->as<geometric::BGL_PRM>()->growRoadmap(1.0);
-        planner->getPlannerData(plannerData);
-
-        unsigned int verts = plannerData.states.size();
-        unsigned int edges =
-            std::accumulate(plannerData.edges.begin(), plannerData.edges.end(),
-                0, accumSizes<unsigned int>) / 2;
-        
-        std::cout << verts << ',' << edges << std::endl;
-    }
 
     typedef geometric::BGL_PRM::Graph Graph;
+    typedef geometric::BGL_PRM::Vertex Vertex;
     typedef geometric::BGL_PRM::Edge Edge;
 
-    const Graph& G = planner->as<geometric::BGL_PRM>()->getGraph();
-    
-    const Graph::vertices_size_type n = boost::num_vertices(G);
-    const Graph::edges_size_type m = boost::num_edges(G);
-    boost::property_map<Graph, boost::edge_weight_t>::const_type
-            weight = boost::get(boost::edge_weight, G);
-    
-    std::cout << "Graph vertices: " << n << std::endl;
-    std::cout << "Graph edges: " << m << std::endl;
-    std::cout << "Graph stats..." << std::endl;
-    std::vector<double> d_graph(n);
-    pathStats(G, d_graph);
+    /** Current graph in the planner */
+    const Graph& G;
 
-    BaswanaSpanner<Graph> S(G, k, heuristic);
-    const std::list<Edge> spannerEdges = S.calculateSpanner();
-    planner->as<geometric::BGL_PRM>()->edgeSetIntersect(spannerEdges);
-    
-    std::cout << "Spanner edges: " << boost::num_edges(G) << std::endl;
+    /** Copy of graph as it was before spanner */
+    Graph originalGraph;
 
-    std::cout << "Spanner stats..." << std::endl;
-    std::vector<double> d_spanner(n);
-    pathStats(G, d_spanner);
+    /** For picking random vertices */
+    boost::rand48 randGen;
 
-    std::cout << "Difference stats..." << std::endl;
-    // Effectively: d_diff = abs(d_graph - d_spanner)
-    std::vector<double> d_diff(n);
-    std::vector<double>::const_iterator graph_iter(d_graph.begin());
-    std::vector<double>::const_iterator spanner_iter(d_spanner.begin());
-    foreach(double& n, d_diff)
-        if (*graph_iter < std::numeric_limits<double>::max() &&
-            *spanner_iter < std::numeric_limits<double>::max())
-            n = fabs(*graph_iter++ - *spanner_iter++);
-        else
+    Experiment(const std::string& environment) :
+        planner(new geometric::BGL_PRM(setup.getSpaceInformation())),
+        G(planner->getGraph())
+    {
+        setup.setPlanner(planner);
+        
+        // load the robot and the environment
+        std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR)
+                + "/" + environment + "_robot.dae";
+        std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR)
+                + "/" + environment + "_env.dae";
+        setup.setRobotMesh(robot_fname.c_str());
+        setup.setEnvironmentMesh(env_fname.c_str());
+
+        // setting collision checking resolution to 1% of the space extent
+        setup.getSpaceInformation()->setStateValidityCheckingResolution(0.01);
+        setup.setup();
+    }
+
+    void explore_space(const unsigned int target_n)
+    {
+        // Repeat for at least target_n milestones have been added.
+        while (plannerData.states.size() < target_n)
         {
-            n = std::numeric_limits<double>::max();
-            ++graph_iter;
-            ++spanner_iter;
+            planner->as<geometric::BGL_PRM>()->growRoadmap(1.0);
+            planner->getPlannerData(plannerData);
+
+            unsigned int verts = plannerData.states.size();
+            unsigned int edges =
+                std::accumulate(plannerData.edges.begin(), plannerData.edges.end(),
+                    0, accumSizes<unsigned int>) / 2;
+
+            std::cerr << verts << ',' << edges << std::endl;
         }
-    distanceStats(d_diff);
-}
+
+        originalGraph = planner->getGraph();
+    }
+
+    void make_spanner(const unsigned int k, const bool heuristic)
+    {
+        BaswanaSpanner<Graph> S(G, k, heuristic);
+        const std::list<Edge> spannerEdges = S.calculateSpanner();
+        planner->edgeSetIntersect(spannerEdges);
+    }
+
+    void print_stats()
+    {
+        const Graph::vertices_size_type n = boost::num_vertices(G);
+        std::vector<double> d_graph(n);
+        std::vector<double> d_spanner(n);
+
+        std::cout << "Graph vertices: " << n << std::endl;
+        std::cout << "Graph edges: " << boost::num_edges(originalGraph) << std::endl;
+        std::cout << "Graph stats..." << std::endl;
+        pathStats(originalGraph, d_graph);
+
+        std::cout << "Spanner stats..." << std::endl;
+        std::cout << "Spanner edges: " << boost::num_edges(G) << std::endl;
+        pathStats(G, d_spanner);
+
+        for (int i = 0; i < 10; ++i)
+        {
+            std::cout << "Difference stats..." << std::endl;
+            foreach(Vertex v, boost::vertices(G))
+            {
+                std::cout << d_graph[v] << ',' << d_spanner[v]/d_graph[v] << std::endl;
+            }
+        }
+    }
+
+    void pathStats(const Graph& G, std::vector<double>& d)
+    {
+        Graph::vertices_size_type n = boost::num_vertices(G);
+
+        Vertex start = boost::random_vertex(G, randGen);
+
+        // Need scratch vector for Dijkstra's
+        std::vector<Vertex> predecessor(n);
+         
+        dijkstra_shortest_paths(G, start,
+            boost::predecessor_map(&predecessor[0]).distance_map(&d[0]));
+    }
+
+};
 
 int main(int argc, char* argv[])
 {
@@ -197,10 +159,9 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    experiment(
-            vm["environment"].as<std::string>(),
-            vm["n"].as<unsigned int>(),
-            vm["k"].as<unsigned int>(),
-            vm["heuristic"].as<bool>()
-    );
+    Experiment exp(vm["environment"].as<std::string>());
+    exp.explore_space(vm["n"].as<unsigned int>());
+    exp.make_spanner(vm["k"].as<unsigned int>(), vm["heuristic"].as<bool>());
+    exp.print_stats();
+   
 }
