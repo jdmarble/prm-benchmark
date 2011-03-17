@@ -2,6 +2,7 @@
 #include <ompl/util/RandomNumbers.h>
 #include <ompl/base/SpaceInformation.h>
 #include <ompl/base/manifolds/SE3StateManifold.h>
+#include <ompl/base/samplers/UniformValidStateSampler.h>
 #include <ompl/geometric/planners/prm/BGL_PRM.h>
 #include <ompl/geometric/SimpleSetup.h>
 #include <ompl/benchmark/Benchmark.h>
@@ -38,38 +39,56 @@ struct Experiment {
     typedef geometric::BGL_PRM::Edge Edge;
 
     app::SE3RigidBodyPlanning setup;
-    
-    boost::shared_ptr<geometric::BGL_PRM> graphPlanner;
-    base::PlannerData graphPlannerData;
+
+    struct KSpanner
+    {
+        boost::shared_ptr<geometric::BGL_PRM> planner_;
+        const Graph& g_;
+        const unsigned int k_;
+        const bool heuristic_;
+
+        KSpanner(const unsigned int k, const bool heuristic,
+                 boost::shared_ptr<geometric::BGL_PRM> planner):
+            planner_(new geometric::BGL_PRM(planner->getSpaceInformation())),
+            g_(planner_->getGraph()),
+            k_(k), heuristic_(heuristic)
+        {
+            planner_->setGraph(planner->getGraph());
+            BaswanaSpanner<Graph> spannerCalc(g_, k, heuristic);
+            const std::list<Edge> spannerEdges = spannerCalc.calculateSpanner();
+            planner_->edgeSetIntersect(spannerEdges);
+            cerr << "k:" << k << " heur:" << heuristic;
+            cerr << " - edges:" << boost::num_edges(g_) << endl;
+
+            planner_->setName(
+                std::string("spanner_") +
+                "k" + boost::lexical_cast<std::string>(k) +
+                "_h" + boost::lexical_cast<std::string>(heuristic) +
+                "_e" + boost::lexical_cast<std::string>(boost::num_edges(g_))
+            );
+        }
+    };
+
+    boost::shared_ptr<geometric::BGL_PRM> planner_;
+    base::PlannerData plannerData_;
     /** Original graph */
-    const Graph& G;
+    const Graph& g_;
 
     Graph::vertices_size_type n;
 
-    boost::shared_ptr<geometric::BGL_PRM> spannerPlanner;
-    base::PlannerData spannerPlannerData;
-    /** Spanner subgraph */
-    const Graph& S;
-       
+    std::list<KSpanner> spanners_;
+
     /** For picking random vertices */
     RNG rng_;
 
     const std::string environment_;
 
-    const unsigned int k_;
-
-    const bool heuristic_;
-
-    Experiment(const std::string& environment,
-               const unsigned int k,
-               const bool heuristic) :
-        graphPlanner(new geometric::BGL_PRM(setup.getSpaceInformation())),
-        G(graphPlanner->getGraph()),
-        spannerPlanner(new geometric::BGL_PRM(setup.getSpaceInformation())),
-        S(spannerPlanner->getGraph()),
-        environment_(environment), k_(k), heuristic_(heuristic)
+    Experiment(const std::string& environment) :
+        planner_(new geometric::BGL_PRM(setup.getSpaceInformation())),
+        g_(planner_->getGraph()),
+        environment_(environment)
     {
-        setup.setPlanner(graphPlanner);
+        setup.setPlanner(planner_);
         
         // load the robot and the environment
         std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR)
@@ -83,54 +102,52 @@ struct Experiment {
         setup.getSpaceInformation()->setStateValidityCheckingResolution(0.01);
         setup.setup();
 
-        graphPlanner->setName("graph");
-        spannerPlanner->setName("spanner");
+        planner_->setName("original");
     }
 
     void explore_space(const unsigned int target_n)
     {
         // Repeat for at least target_n milestones have been added.
-        while (graphPlannerData.states.size() < target_n)
+        while (plannerData_.states.size() < target_n)
         {
-            graphPlanner->growRoadmap(1.0);
-            graphPlanner->getPlannerData(graphPlannerData);
+            planner_->growRoadmap(1.0);
+            planner_->getPlannerData(plannerData_);
 
-            unsigned int verts = graphPlannerData.states.size();
+            unsigned int verts = plannerData_.states.size();
             unsigned int edges =
-                std::accumulate(graphPlannerData.edges.begin(), graphPlannerData.edges.end(),
+                std::accumulate(plannerData_.edges.begin(), plannerData_.edges.end(),
                     0, accumSizes<unsigned int>) / 2;
 
             std::cerr << verts << ',' << edges << std::endl;
         }
-        n = boost::num_vertices(G);
+        n = boost::num_vertices(g_);
     }
 
-    void make_spanner()
+    void make_spanner(const unsigned int k, const bool heuristic = false)
     {
-        spannerPlanner->setGraph(graphPlanner->getGraph());
-        BaswanaSpanner<Graph> spannerCalc(S, k_, heuristic_);
-        const std::list<Edge> spannerEdges = spannerCalc.calculateSpanner();
-        spannerPlanner->edgeSetIntersect(spannerEdges);
-        cerr << "spanner edges:" << boost::num_edges(S) << endl;
+        spanners_.push_back(KSpanner(k, heuristic, planner_));
     }
 
     void print_stats()
     {
-        for (int i = 0; i < 10; ++i)
+        for (int i = 0; i <= 1; ++i)
         {
-            Vertex start = rng_.uniformInt(*(boost::vertices(G).first), n);
+            Vertex start = rng_.uniformInt(*(boost::vertices(g_).first), n);
 
             boost::vector_property_map<double> d_graph(n);
-            pathStats(G, d_graph, start);
+            pathStats(g_, d_graph, start);
 
-            boost::vector_property_map<double> d_spanner(n);
-            pathStats(S, d_spanner, start);
-
-            foreach(Vertex v, boost::vertices(G))
+            foreach (KSpanner& s, spanners_)
             {
-                std::cout << k_ << ',' << heuristic_ << ',' << i << ',';
-                std::cout << d_graph[v] << ',' << d_spanner[v];
-                std::cout << std::endl;
+                boost::vector_property_map<double> d_spanner(n);
+                pathStats(s.g_, d_spanner, start);
+
+                foreach(Vertex v, boost::vertices(g_))
+                {
+                    std::cout << s.k_ << ',' << s.heuristic_ << ',';
+                    std::cout << d_graph[v] << ',' << d_spanner[v];
+                    std::cout << std::endl;
+                }
             }
         }
     }
@@ -149,25 +166,25 @@ struct Experiment {
     {
         // create the benchmark object and add all the planners we'd like to run
         const std::string benchmark_name = environment_;
-        Benchmark b(setup, benchmark_name);
-        b.addPlanner(graphPlanner);
-        b.addPlanner(spannerPlanner);
+        Benchmark b(setup, benchmark_name);        
+        foreach (KSpanner& s, spanners_)
+            b.addPlanner(s.planner_);
+        b.addPlanner(planner_);
 
-        base::ScopedState<base::SE3StateManifold> start(setup.getSpaceInformation());
-        start->setX(270.);
-        start->setY(160.);
-        start->setZ(-200.);
-        start->rotation().setIdentity();
+        // Find some valid start/goal pairs and add them to the benchmark.
+        base::UniformValidStateSampler sampler(&*setup.getSpaceInformation());
+        for (int i = 0; i < 100; ++i)
+        {
+            base::State* start = setup.getStateManifold()->allocState();
+            sampler.sample(start);
 
-        base::ScopedState<base::SE3StateManifold> goal(start);
-        goal->setX(270.);
-        goal->setY(160.);
-        goal->setZ(-400.);
-        goal->rotation().setIdentity();
+            base::State* goal = setup.getStateManifold()->allocState();
+            sampler.sample(goal);
 
-        setup.setStartAndGoalStates(start, goal);
+            b.addProblem(start, goal);
+        }
 
-        b.benchmark(10, 10000, 50, true);
+        b.benchmark(0.01, 10000, 50, true, false);
         b.saveResultsToFile((benchmark_name + ".log").c_str());
     }
 };
@@ -175,7 +192,7 @@ struct Experiment {
 int main(int argc, char* argv[])
 {
     // Turn off logging to std::out. Need the stream for file output.
-    msg::noOutputHandler();
+    //msg::noOutputHandler();
 
     // Declare the supported options.
     po::options_description desc("Allowed options");
@@ -183,8 +200,6 @@ int main(int argc, char* argv[])
         ("help", "produce help message")
         ("environment", po::value<std::string>(), "environment name")
         ("n", po::value<unsigned int>(), "number of nodes in graph")
-        ("k", po::value<unsigned int>(), "create a 2k-1 spanner")
-        ("heuristic", po::value<bool>(), "use cluster heuristic")
     ;
 
     po::variables_map vm;
@@ -196,14 +211,13 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    Experiment exp(
-        vm["environment"].as<std::string>(),
-        vm["k"].as<unsigned int>(),
-        vm["heuristic"].as<bool>()
-    );
+    Experiment exp(vm["environment"].as<std::string>());
     exp.explore_space(vm["n"].as<unsigned int>());
-    exp.make_spanner();
-    //exp.print_stats();
+
+    for(int k = 2; k <=9; ++k)
+        exp.make_spanner(k);
+
+    exp.print_stats();
     
     exp.benchmark();
 }
