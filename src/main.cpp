@@ -82,6 +82,9 @@ struct Experiment {
         // setting collision checking resolution to 1% of the space extent
         setup.getSpaceInformation()->setStateValidityCheckingResolution(0.01);
         setup.setup();
+
+        graphPlanner->setName("graph");
+        spannerPlanner->setName("spanner");
     }
 
     void explore_space(const unsigned int target_n)
@@ -150,8 +153,22 @@ struct Experiment {
         b.addPlanner(graphPlanner);
         b.addPlanner(spannerPlanner);
 
-        b.benchmark(1, 10000, 50, false);
-        b.saveResultsToFile();
+        base::ScopedState<base::SE3StateManifold> start(setup.getSpaceInformation());
+        start->setX(270.);
+        start->setY(160.);
+        start->setZ(-200.);
+        start->rotation().setIdentity();
+
+        base::ScopedState<base::SE3StateManifold> goal(start);
+        goal->setX(270.);
+        goal->setY(160.);
+        goal->setZ(-400.);
+        goal->rotation().setIdentity();
+
+        setup.setStartAndGoalStates(start, goal);
+
+        b.benchmark(10, 10000, 50, true);
+        b.saveResultsToFile((benchmark_name + ".log").c_str());
     }
 };
 
@@ -186,7 +203,7 @@ int main(int argc, char* argv[])
     );
     exp.explore_space(vm["n"].as<unsigned int>());
     exp.make_spanner();
-    exp.print_stats();
+    //exp.print_stats();
     
-    //exp.benchmark();
+    exp.benchmark();
 }
