@@ -53,7 +53,7 @@ struct Experiment {
             g_(planner_->getGraph()),
             k_(k), heuristic_(heuristic)
         {
-            planner_->setGraph(planner->getGraph());
+            planner_->copyPRMGraph(*planner);
             BaswanaSpanner<Graph> spannerCalc(g_, k, heuristic);
             const std::list<Edge> spannerEdges = spannerCalc.calculateSpanner();
             planner_->edgeSetIntersect(spannerEdges);
@@ -166,10 +166,10 @@ struct Experiment {
     {
         // create the benchmark object and add all the planners we'd like to run
         const std::string benchmark_name = environment_;
-        Benchmark b(setup, benchmark_name);        
-        foreach (KSpanner& s, spanners_)
-            b.addPlanner(s.planner_);
+        Benchmark b(setup, benchmark_name);
         b.addPlanner(planner_);
+        foreach (KSpanner& s, spanners_)
+            b.addPlanner(s.planner_);        
 
         // Find some valid start/goal pairs and add them to the benchmark.
         base::UniformValidStateSampler sampler(&*setup.getSpaceInformation());
@@ -181,10 +181,10 @@ struct Experiment {
             base::State* goal = setup.getStateManifold()->allocState();
             sampler.sample(goal);
 
-            b.addProblem(start, goal);
+            b.addProblem(start, goal);            
         }
 
-        b.benchmark(0.01, 10000, 50, true, false);
+        b.benchmark(0.01, 10000, -1, true, false);
         b.saveResultsToFile((benchmark_name + ".log").c_str());
     }
 };
@@ -217,7 +217,7 @@ int main(int argc, char* argv[])
     for(int k = 2; k <=9; ++k)
         exp.make_spanner(k);
 
-    exp.print_stats();
+    //exp.print_stats();
     
     exp.benchmark();
 }
