@@ -21,14 +21,19 @@ include_directories (${Boost_INCLUDE_DIRS})
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
 include_directories (${PROJECT_SOURCE_DIR}/include)
-file(GLOB_RECURSE PROJECT_SRC src/*.cpp)
-add_executable(${PROJECT_NAME} ${PROJECT_SRC})
 
+add_executable(${PROJECT_NAME} src/main.cpp)
 target_link_libraries(${PROJECT_NAME}
 	${OMPL_LIBRARY}
 	${OMPLAPP_LIBRARY}
 	${PQP_LIBRARY}
 	${ASSIMP_LIBRARY}
+	${Boost_PROGRAM_OPTIONS_LIBRARY}
+	)
+
+add_executable(twodee src/TwoDee.cpp)
+target_link_libraries(twodee
+	${OMPL_LIBRARY}
 	${Boost_PROGRAM_OPTIONS_LIBRARY}
 	)
 
