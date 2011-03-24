@@ -214,8 +214,9 @@ int main(int argc, char* argv[])
     Experiment exp(vm["environment"].as<std::string>());
     exp.explore_space(vm["n"].as<unsigned int>());
 
-    for(int k = 2; k <=9; ++k)
-        exp.make_spanner(k);
+    for(int i = 0; i < 10; ++i)
+        for(int k = 2; k <=9; ++k)
+            exp.make_spanner(k);
 
     //exp.print_stats();
     
