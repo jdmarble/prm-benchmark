@@ -4,17 +4,30 @@
 #include <ompl/geometric/SimpleSetup.h>
 #include <ompl/config.h>
 
+#include <boost/accumulators/accumulators.hpp>
+#include <boost/accumulators/statistics/stats.hpp>
+#include <boost/accumulators/statistics/mean.hpp>
+
 #include <boost/program_options.hpp>
 #include <iostream>
 
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
 namespace b = boost;
+namespace ba = boost::accumulators;
 namespace po = boost::program_options;
 
 #include "baswana_randomized_spanner.h"
+#include <boost/graph/johnson_all_pairs_shortest.hpp>
+#include <boost/multi_array.hpp>
+#include <boost/graph/adjacency_matrix.hpp>
 
 typedef ob::RealVectorStateManifold::StateType R2State;
+typedef og::BGL_PRM::Graph Graph;
+typedef og::BGL_PRM::Vertex Vertex;
+typedef og::BGL_PRM::Edge Edge;
+typedef og::BGL_PRM::vertex_state_t vertex_state_t;
+
 
 bool isStateValid(const ob::State *state)
 {
@@ -26,6 +39,20 @@ bool isStateValid(const ob::State *state)
     // check validity of state
     const bool inSlat = (int)(y*10)%2;
     return !(x > -0.25 && x < 0.25 && inSlat);
+}
+
+double meanPathLength(const Graph& g)
+{
+    const unsigned int n = b::num_vertices(g);
+    b::multi_array<double, 2> d(b::extents[n][n]);
+    bool success = b::johnson_all_pairs_shortest_paths(g, d);
+
+    ba::accumulator_set<double, ba::stats<ba::tag::mean> > acc;
+    for(unsigned int x = 0; x < n; ++x)
+        for(unsigned int y = 0; y < n; ++y)
+            acc(d[x][y]);
+
+    return ba::mean(acc);
 }
 
 void plan(const unsigned int target_n)
@@ -60,7 +87,7 @@ void plan(const unsigned int target_n)
     // print the settings for this space
     si->printSettings(std::cerr);
 
-    const og::BGL_PRM::Graph& g = planner->as<og::BGL_PRM>()->getGraph();
+    const Graph& g = planner->as<og::BGL_PRM>()->getGraph();
 
     // Repeat for at least target_n milestones have been added.
     while (b::num_vertices(g) < target_n)
@@ -69,15 +96,15 @@ void plan(const unsigned int target_n)
         std::cerr << b::num_vertices(g) << ',' << b::num_edges(g) << std::endl;
     }
 
-    BaswanaSpanner<og::BGL_PRM::Graph> spannerCalc(g, 9, false);
-    const std::list<og::BGL_PRM::Edge> s = spannerCalc.calculateSpanner();
+    BaswanaSpanner<Graph> spannerCalc(g, 9, false);
+    const std::list<Edge> s = spannerCalc.calculateSpanner();
 
     std::cout << "index,spanner,x0,y0,x1,y1" << std::endl;
-    b::property_map<og::BGL_PRM::Graph, og::BGL_PRM::vertex_state_t>::const_type
-        state = boost::get(og::BGL_PRM::vertex_state_t(), g);
-    b::property_map<og::BGL_PRM::Graph, b::edge_index_t>::const_type
+    b::property_map<Graph, vertex_state_t>::const_type
+        state = boost::get(vertex_state_t(), g);
+    b::property_map<Graph, b::edge_index_t>::const_type
         index = boost::get(b::edge_index, g);
-    foreach(og::BGL_PRM::Edge e, b::edges(g))
+    foreach(Edge e, b::edges(g))
     {
         std::cout << b::lexical_cast<std::string>(index[e]) << ',';
 
@@ -94,6 +121,24 @@ void plan(const unsigned int target_n)
         std::cout << b::lexical_cast<std::string>((*s2)[0]) << ',';
         std::cout << b::lexical_cast<std::string>((*s2)[1]) << std::endl;
     }
+
+    std::cerr << "Graph mean path length:" << meanPathLength(g) << std::endl;
+    std::cerr << "Graph edges:" << b::num_edges(g) << std::endl;
+
+    b::property_map<Graph, b::edge_weight_t>::const_type
+        weight = boost::get(b::edge_weight, g);
+    Graph g_s(b::num_vertices(g));
+    foreach(Edge e, s)
+    {
+        Vertex v1 = b::source(e, g);
+        Vertex v2 = b::target(e, g);
+        const Graph::edge_property_type properties(weight[e], index[e]);
+        
+        b::add_edge(v1, v2, properties, g_s);
+    }
+
+    std::cerr << "Spanner mean path length:" << meanPathLength(g_s) << std::endl;
+    std::cerr << "Spanner edges:" << b::num_edges(g_s) << std::endl;
 }
 
 int main(int argc, char* argv[])
