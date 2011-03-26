@@ -144,41 +144,50 @@ private:
 
     struct ClusterDegree
     {
-        unordered_map<Vertex, unsigned int> degree;
+        const Graph& g_;
+        const ClusterMap& clusters_;
+        const EdgeSet& E_;
+        const unordered_set<Vertex> unsampled_vertices_;
 
-        ClusterDegree(const Graph& G,
-            const ClusterMap& clusters, const EdgeSet& E_)
+        ClusterDegree(const Graph& g, const ClusterMap& clusters,
+            const EdgeSet& E, unordered_set<Vertex> unsampled_vertices) :
+            g_(g), clusters_(clusters), E_(E),
+            unsampled_vertices_(unsampled_vertices) {}
+
+        unsigned int degree(const Vertex& c)
         {
-            // Count all (vertex) neighbors of all clusters.
+            unordered_set<Vertex> neighbors;
+
             typedef pair<Vertex, Vertex> ChildParent;
-            foreach(ChildParent cp, clusters)
+            foreach(ChildParent cp, clusters_)
             {
                 const Vertex v = cp.first;
-                const Vertex x = cp.second;
-                foreach(Edge e, out_edges(v, G))
-                {
-                    const Vertex u = target(e, G);
-                    typename ClusterMap::const_iterator cluster = clusters.find(u);
-                    // Neighbor is not in a cluster or in a different cluster
-                    if (in(E_, e) && 
-                            (cluster == clusters.end() ||
-                            (*cluster).second != x))
-                        ++degree[x];
-                }
+                const Vertex x = cp.second; // cluster center
+                if (c == x)
+                    foreach(Edge e, out_edges(v, g_))
+                    {
+                        const Vertex u = target(e, g_);
+                        if (in(E_, e) && in(unsampled_vertices_, u))
+                            neighbors.insert(u);
+                    }
             }
 
-
+            return neighbors.size();
         }
 
         bool operator()(const Vertex& c1, const Vertex& c2)
         {
             // Will default to 0 if no neighbors.
-            return degree[c1] < degree[c2];
+            return degree(c1) < degree(c2);
         }
     };
 
     void sampleClusters()
     {
+        const double sample_prob = pow((double)n, -1.0/(double)k);
+        const unsigned int expected_clusters =
+            cluster_centers.size() * sample_prob;
+
         last_cluster_centers = cluster_centers;
         cluster_centers.clear();
 
@@ -186,63 +195,54 @@ private:
         clusters.clear();
 
         unsampled_vertices.clear();
+        foreach(Vertex v, vertices(G))
+        {
+            unsampled_vertices.insert(v);
+        }
 
         if (cluster_heur)
         {
-            // Sort by degree
-            vector<Vertex> sorted_clusters(
+            // Heap by degree
+            vector<Vertex> cluster_heap(
                     last_cluster_centers.begin(), last_cluster_centers.end());
-            cout << "Sorted clusters:" << sorted_clusters.size() << endl;
-            sort(sorted_clusters.begin(), sorted_clusters.end(),
-                ClusterDegree(G, last_clusters, E_));
-
-            // Find all neighbors of all clusters.
-            unordered_map<Vertex, unordered_set<Vertex> > clusterNeighbors;
-            typedef pair<Vertex, Vertex> ChildParent;
-            foreach(ChildParent cp, last_clusters)
-            {
-                const Vertex v = cp.first;
-                const Vertex x = cp.second;
-                foreach(Edge e, out_edges(v, G))
-                {
-                    const Vertex u = target(e, G);                    
-                    // Neighbor is not in a cluster or in a different cluster
-                    if (in(E_, e) && 
-                            in(last_clusters, u) && last_clusters[u] != x)
-                        clusterNeighbors[x].insert(last_clusters[u]);
-                }
-            }
-
-            // Start with all clusters available
-            unordered_set<Vertex> unavailable_clusters;
-
-            // Add clusters with no added neighbors
-            foreach(Vertex c, sorted_clusters)
-            {
-                if (!in(unavailable_clusters, c))
-                {
-                    cluster_centers.insert(c);
+            
+            // Degree comparison
+            ClusterDegree comp(G, last_clusters, E_, unsampled_vertices);
                     
-                    foreach(Vertex c_, clusterNeighbors[c])
-                        unavailable_clusters.insert(c_);
-                }
+            while(cluster_centers.size() < expected_clusters)
+            {
+                // TODO: Just use max?
+                make_heap(cluster_heap.begin(), cluster_heap.end(), comp);
+                const Vertex c = *cluster_heap.begin();
+                pop_heap(cluster_heap.begin(), cluster_heap.end(), comp);
+
+                make_sampled_cluster(c);
             }
         }
         else
         {
             foreach (Vertex c, last_cluster_centers)
-                if (uniform01() < pow((double)n, -1.0/(double)k))
-                    cluster_centers.insert(c);         
-        }
-
-        // Copy the sampled clusters from the last clusters
-        foreach (Cluster vc, last_clusters)
-            if (in(cluster_centers, vc.second))
-                clusters[vc.first] = vc.second;
-            else
-                unsampled_vertices.insert(vc.first);        
+                if (uniform01() < sample_prob)
+                    make_sampled_cluster(c);
+        }  
     }
 
+    void make_sampled_cluster(const Vertex& c)
+    {
+        cluster_centers.insert(c);
+
+        typedef pair<Vertex, Vertex> ChildParent;
+        foreach(ChildParent cp, last_clusters)
+        {
+            const Vertex v = cp.first;
+            const Vertex x = cp.second; // cluster center
+            if (c == x)
+            {
+                clusters[v] = c;
+                unsampled_vertices.erase(v);
+            }
+        }
+    }
 
     void connectToSampled()
     {
