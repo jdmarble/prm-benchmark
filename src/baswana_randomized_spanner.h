@@ -100,14 +100,14 @@ class BaswanaSpanner
 
 public:
 
-    BaswanaSpanner(const Graph& G, const unsigned int k,
-            const bool cluster_heur = false)
+    BaswanaSpanner(const Graph& G, const int seed,
+	const unsigned int k, const bool cluster_heur = false)
     : G(G), k(k), cluster_heur(cluster_heur),
     n(num_vertices(G)), m(num_edges(G)),
     null_vertex(graph_traits<Graph>::null_vertex()),
     index(get(edge_index, G)), weight(get(edge_weight, G)),
     E_(m, EdgeHash(index), EdgeEq(index)),
-    uniform01(rand48(), uniform_01<double>())
+    uniform01(rand48(seed), uniform_01<double>())
     {
         // Add all edges in E to E'
         foreach(Edge e, edges(G))

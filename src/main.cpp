@@ -47,14 +47,14 @@ struct Experiment {
         const unsigned int k_;
         const bool heuristic_;
 
-        KSpanner(const unsigned int k, const bool heuristic,
+        KSpanner(const int seed, const unsigned int k, const bool heuristic,
                  boost::shared_ptr<geometric::BGL_PRM> planner):
             planner_(new geometric::BGL_PRM(planner->getSpaceInformation())),
             g_(planner_->getGraph()),
             k_(k), heuristic_(heuristic)
         {
             planner_->copyPRMGraph(*planner);
-            BaswanaSpanner<Graph> spannerCalc(g_, k, heuristic);
+            BaswanaSpanner<Graph> spannerCalc(g_, seed, k, heuristic);
             const std::list<Edge> spannerEdges = spannerCalc.calculateSpanner();
             planner_->edgeSetIntersect(spannerEdges);
             cerr << "k:" << k << " heur:" << heuristic;
@@ -123,9 +123,9 @@ struct Experiment {
         n = boost::num_vertices(g_);
     }
 
-    void make_spanner(const unsigned int k, const bool heuristic = false)
+    void make_spanner(const int seed, const unsigned int k, const bool heuristic = false)
     {
-        spanners_.push_back(KSpanner(k, heuristic, planner_));
+        spanners_.push_back(KSpanner(seed, k, heuristic, planner_));
     }
 
     void print_stats()
@@ -200,6 +200,7 @@ int main(int argc, char* argv[])
         ("help", "produce help message")
         ("environment", po::value<std::string>(), "environment name")
         ("n", po::value<unsigned int>(), "number of nodes in graph")
+        ("count", po::value<unsigned int>(), "number of times to run each spanner")
     ;
 
     po::variables_map vm;
@@ -214,9 +215,9 @@ int main(int argc, char* argv[])
     Experiment exp(vm["environment"].as<std::string>());
     exp.explore_space(vm["n"].as<unsigned int>());
 
-    for(int i = 0; i < 10; ++i)
-        for(int k = 2; k <=9; ++k)
-            exp.make_spanner(k);
+    for(unsigned int i = 0; i < vm["count"].as<unsigned int>(); ++i)
+        for(unsigned int k = 2; k <=9; ++k)
+            exp.make_spanner(i, k);
 
     //exp.print_stats();
     
