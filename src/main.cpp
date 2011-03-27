@@ -217,7 +217,9 @@ int main(int argc, char* argv[])
 
     for(unsigned int i = 0; i < vm["count"].as<unsigned int>(); ++i)
         for(unsigned int k = 2; k <=9; ++k)
-            exp.make_spanner(i, k);
+            exp.make_spanner(i, k, false);
+    for(unsigned int k = 2; k <=9; ++k)
+        exp.make_spanner(0, k, true);
 
     //exp.print_stats();
     

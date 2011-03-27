@@ -28,13 +28,19 @@
 #include <boost/unordered_map.hpp>
 #include <boost/unordered_set.hpp>
 
+#include <boost/bind.hpp>
+
 using namespace boost;
+
+#include <algorithm>
+
 using namespace std;
 
 
 template<typename Container>
 bool in(const Container& c, const typename Container::key_type& v)
 {
+    if (c.empty()) return false;
     return c.find(v) != c.end();
 }
 
@@ -64,7 +70,7 @@ class BaswanaSpanner
     ClusterMap last_clusters;
     unordered_set<Vertex> cluster_centers;
     unordered_set<Vertex> last_cluster_centers;
-    unordered_set<Vertex> unsampled_vertices;
+    unordered_set<Vertex> sampled_vertices;
     unordered_map<Vertex, Edge> lightest_cluster_edge;
     list<Edge> spanner_edges;
 
@@ -142,45 +148,43 @@ public:
 
 private:
 
-    struct ClusterDegree
+    void calc_degrees(unordered_map<Vertex, unsigned int>& degree)
     {
-        const Graph& g_;
-        const ClusterMap& clusters_;
-        const EdgeSet& E_;
-        const unordered_set<Vertex> unsampled_vertices_;
-
-        ClusterDegree(const Graph& g, const ClusterMap& clusters,
-            const EdgeSet& E, unordered_set<Vertex> unsampled_vertices) :
-            g_(g), clusters_(clusters), E_(E),
-            unsampled_vertices_(unsampled_vertices) {}
-
-        unsigned int degree(const Vertex& c)
+        unordered_set<Vertex> covered;
+        foreach(Edge e, E_)
         {
-            unordered_set<Vertex> neighbors;
+            const Vertex& v = source(e, G);
+            const Vertex& u = target(e, G);
 
-            typedef pair<Vertex, Vertex> ChildParent;
-            foreach(ChildParent cp, clusters_)
+            if (in(sampled_vertices, v) || in(sampled_vertices, u))
             {
-                const Vertex v = cp.first;
-                const Vertex x = cp.second; // cluster center
-                if (c == x)
-                    foreach(Edge e, out_edges(v, g_))
-                    {
-                        const Vertex u = target(e, g_);
-                        if (in(E_, e) && in(unsampled_vertices_, u))
-                            neighbors.insert(u);
-                    }
+                covered.insert(u);
+                covered.insert(v);
             }
-
-            return neighbors.size();
         }
 
-        bool operator()(const Vertex& c1, const Vertex& c2)
+        typedef unordered_map<Vertex, unordered_set<Vertex> > NMap;
+        typedef typename NMap::value_type N;
+        NMap neighborMap;
+
+        foreach(Edge e, E_)
         {
-            // Will default to 0 if no neighbors.
-            return degree(c1) < degree(c2);
+            const Vertex& v = source(e, G);
+            const Vertex& u = target(e, G);
+
+            if (in(last_clusters, v) &&
+                !in(sampled_vertices, v) && !in(covered, u) )
+                neighborMap[last_clusters[v]].insert(u);
+
+            if (in(last_clusters, u) &&
+                !in(sampled_vertices, u) && !in(covered, v) )
+                neighborMap[last_clusters[u]].insert(v);
         }
-    };
+
+        degree.clear();
+        foreach(N& neighbors, neighborMap)
+            degree[neighbors.first] = neighbors.second.size();
+    }
 
     void sampleClusters()
     {
@@ -194,29 +198,24 @@ private:
         last_clusters = clusters;
         clusters.clear();
 
-        unsampled_vertices.clear();
-        foreach(Vertex v, vertices(G))
-        {
-            unsampled_vertices.insert(v);
-        }
+        sampled_vertices.clear();
 
         if (cluster_heur)
         {
-            // Heap by degree
-            vector<Vertex> cluster_heap(
-                    last_cluster_centers.begin(), last_cluster_centers.end());
-            
-            // Degree comparison
-            ClusterDegree comp(G, last_clusters, E_, unsampled_vertices);
+            typedef unordered_map<Vertex, unsigned int> Map;
+            typedef typename Map::value_type MapPair;
+            Map degree;
                     
             while(cluster_centers.size() < expected_clusters)
             {
-                // TODO: Just use max?
-                make_heap(cluster_heap.begin(), cluster_heap.end(), comp);
-                const Vertex c = *cluster_heap.begin();
-                pop_heap(cluster_heap.begin(), cluster_heap.end(), comp);
+                calc_degrees(degree);
+                if (degree.empty()) break;
 
-                make_sampled_cluster(c);
+                // Max by second (degree)                
+                MapPair c = *max_element(degree.begin(), degree.end(),
+                    bind(&MapPair::second, _1) < bind(&MapPair::second, _2));
+
+                make_sampled_cluster(c.first);
             }
         }
         else
@@ -228,7 +227,7 @@ private:
     }
 
     void make_sampled_cluster(const Vertex& c)
-    {
+    {   
         cluster_centers.insert(c);
 
         typedef pair<Vertex, Vertex> ChildParent;
@@ -239,7 +238,7 @@ private:
             if (c == x)
             {
                 clusters[v] = c;
-                unsampled_vertices.erase(v);
+                sampled_vertices.insert(v);
             }
         }
     }
@@ -247,36 +246,28 @@ private:
     void connectToSampled()
     {
         lightest_cluster_edge.clear();
-        foreach(Vertex v, unsampled_vertices)
-        {
-            foreach(Edge e, out_edges(v, G))
-            {
-                const Vertex u = target(e, G);
-                // If this edge connects to a vertex in a sampled cluster.
-                if (in(E_, e) && in(clusters, u) &&
-                        (!in(lightest_cluster_edge, v) ||
-                         weight[e] < weight[lightest_cluster_edge[v]])
-                   )
+        foreach(Vertex v, vertices(G))
+            if (!in(sampled_vertices, v))
+                foreach(Edge e, out_edges(v, G))
                 {
-                    lightest_cluster_edge[v] = e;
+                    const Vertex u = target(e, G);
+                    // If this edge connects to a vertex in a sampled cluster.
+                    if (in(E_, e) && in(clusters, u) &&
+                            (!in(lightest_cluster_edge, v) ||
+                             weight[e] < weight[lightest_cluster_edge[v]])
+                       )
+                       lightest_cluster_edge[v] = e;
                 }
-            }
-        }
     }
 
     void addEdgesToSpanner()
     {
-        foreach(Vertex v, unsampled_vertices)
-        {
-            if (lightest_cluster_edge.find(v) == lightest_cluster_edge.end())
-            {
-                moveAllE_vc(v);
-            }
-            else
-            {
-                connectCluster(v);
-            }
-        }
+        foreach(Vertex v, vertices(G))
+            if (!in(sampled_vertices, v))
+                if (!in(lightest_cluster_edge,v))
+                    moveAllE_vc(v);
+                else
+                    connectCluster(v);
     }
 
     void moveAllE_vc(const Vertex& v)
