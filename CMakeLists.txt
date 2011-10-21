@@ -16,7 +16,7 @@ include_directories (${PQP_INCLUDE_DIR})
 find_package(ASSIMP REQUIRED)
 include_directories (${ASSIMP_INCLUDE_DIR})
 
-find_package(Boost REQUIRED program_options)
+find_package(Boost REQUIRED program_options filesystem)
 include_directories (${Boost_INCLUDE_DIRS})
 
 set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
@@ -31,10 +31,22 @@ target_link_libraries(${PROJECT_NAME}
 	${Boost_PROGRAM_OPTIONS_LIBRARY}
 	)
 
-add_executable(twodee src/TwoDee.cpp)
-target_link_libraries(twodee
+add_executable(unf src/main_smooth.cpp)
+target_link_libraries(unf
 	${OMPL_LIBRARY}
+	${OMPLAPP_LIBRARY}
+	${PQP_LIBRARY}
+	${ASSIMP_LIBRARY}
 	${Boost_PROGRAM_OPTIONS_LIBRARY}
 	)
 
-add_subdirectory(${PROJECT_SOURCE_DIR}/tests)
+add_executable(draw_graph src/main_graph.cpp)
+target_link_libraries(draw_graph
+	${OMPL_LIBRARY}
+	${OMPLAPP_LIBRARY}
+	${PQP_LIBRARY}
+	${ASSIMP_LIBRARY}
+	${Boost_LIBRARIES}
+	)
+
+#add_subdirectory(${PROJECT_SOURCE_DIR}/tests)

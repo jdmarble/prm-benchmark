@@ -14,12 +14,13 @@
 #include <omplapp/apps/SE3RigidBodyPlanning.h>
 #include <omplapp/apps/SE2RigidBodyPlanning.h>
 
-#include <boost/graph/astar_search.hpp>
 #include <boost/program_options.hpp>
 #include <iostream>
 
 #include <boost/foreach.hpp>
 #define foreach BOOST_FOREACH
+
+#include "baswana_randomized_spanner.h"
 
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
@@ -34,12 +35,19 @@ typedef std::pair<ob::State*, ob::State*> Witness;
 
 
 ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
-    const double stretch, const double epsilon)
+    const double stretch, const double epsilon, const bool baswana)
 {
     ob::PlannerPtr planner;
     if (stretch > 1.0 && epsilon > 0.0)
+    {
+        if (baswana)
+        {
+            std::cerr << "Can't run Baswana algorithm with additive term.";
+            exit(1);
+        }
         planner.reset(new og::IRS2(si, stretch, epsilon));
-    else if (stretch > 1.0)
+    }
+    else if (stretch > 1.0 && !baswana)
     {
         planner.reset(new og::PRM(si, true));
         planner->setName("IRS");
@@ -59,43 +67,42 @@ ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
     return planner;
 }
 
-void outputWitnessQuality (og::PRM* const prm,
+void outputWitnessQuality (ob::PlannerPtr planner,
     const std::vector<Witness>& witnesses)
 {
-    og::PRM::Graph& g = prm->getRoadmap();
-    boost::vector_property_map<double> distance_map(boost::num_vertices(g) + 2);
-
-    const ompl::time::point start_time = ompl::time::now();
-    double search_time = 0;
-
-    std::cout << ":costs [";
+    std::vector<ob::PathPtr> solution_paths;
     foreach (const Witness& witness, witnesses)
     {
-        Vertex start = prm->addFakeMilestone(witness.first);
-        Vertex goal = prm->addFakeMilestone(witness.second);
-
-        const ompl::time::point search_start = ompl::time::now();
-
-        b::astar_search(g, start,
-            b::bind(&og::PRM::distanceFunction, prm, _1, goal),
-            b::weight_map(boost::get(&og::PRM::EdgeProperties::weight, g))
-                    .distance_map(distance_map));
-
-        search_time += ompl::time::seconds(ompl::time::now() - search_start);
-
-        std::cout << distance_map[goal] << ' ';
-
-        b::clear_vertex(goal, g);
-        b::remove_vertex(goal, g);
-        b::clear_vertex(start, g);
-        b::remove_vertex(start, g);
+        planner->getProblemDefinition()
+            ->setStartAndGoalStates(witness.first, witness.second);
+        planner->solve(1.0);
+        ob::PathPtr path =
+            planner->getProblemDefinition()->getGoal()->getSolutionPath();
+        solution_paths.push_back(path);
     }
-    std::cout << ']';
 
-    const double query_time = ompl::time::seconds(ompl::time::now() - start_time);
+    og::PathSimplifier simplifier(planner->getSpaceInformation());
 
-    std::cout << " :query_time " << query_time / witnesses.size();
-    std::cout << " :search_time " << search_time / witnesses.size();
+    const ompl::time::point start = ompl::time::now();
+
+    double original_cost = 0;
+    double smoothed_cost = 0;
+    foreach (ob::PathPtr path, solution_paths)
+    {
+        original_cost += path->length();
+        og::PathGeometric* gPath = dynamic_cast<og::PathGeometric*>(path.get());
+        gPath->subdivide();
+        gPath->subdivide();
+        gPath->subdivide();
+        simplifier.simplifyMax(*gPath);
+        smoothed_cost += path->length();
+    }
+    
+    const double smoothing_time = ompl::time::seconds(ompl::time::now() - start);
+
+    std::cout << " :original_cost " << original_cost / witnesses.size();
+    std::cout << " :smoothed_cost " << smoothed_cost / witnesses.size();
+    std::cout << " :smoothing_time " << smoothing_time / witnesses.size();
 }
 
 void generateWitnesses (const unsigned int n, ob::PlannerPtr planner,
@@ -122,7 +129,8 @@ void generateWitnesses (const unsigned int n, ob::PlannerPtr planner,
 
 void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesses,
     const unsigned int max_size, const double max_time,
-    const std::string& environment, const double stretch, const double epsilon)
+    const std::string& environment, const double stretch, const double epsilon,
+    const bool baswana)
 {
     og::PRM* prm = dynamic_cast<og::PRM*>(planner.get());
     assert(prm != NULL);
@@ -144,44 +152,29 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
     if (epsilon > 0.0)
         std::cout << " :epsilon " << epsilon;
 
-    std::cout << " :data [" << std::endl;
     unsigned int size = 0;
     double time = 0;
-    const double time_step = 10.0;
+    const double time_step = 1.0;
     while (size < max_size && time < max_time)
     {
         planner->as<og::PRM>()->growRoadmap(time_step);
         time += time_step;
-        const unsigned int n = b::num_vertices(g);
-        const unsigned int m = b::num_edges(g);
-        size = (n * vertex_size) + (m * edge_size);
-
-        std::cout << '{';
-        std::cout << ":n " << n << ' ';
-        std::cout << ":m " << m << ' ';
-        std::cout << ":time " << time << ' ';  // TODO: Use timer for better accuracy!
-        std::cout << ":size " << size << ' ';
-
-        const og::IRS2* const irs2 = dynamic_cast<const og::IRS2*>(planner.get());
-        if (irs2 != NULL)
-        {
-            std::cout << ":max_failures " << irs2->getMaxFailures() << ' ';
-            const Graph& g_dense = irs2->getDenseRoadmap();
-            const unsigned int n_dense = b::num_vertices(g_dense);
-            const unsigned int m_dense = b::num_edges(g_dense);
-            const unsigned int size_dense = (n_dense * vertex_size) + (m_dense * edge_size);
-
-            std::cout << ":n_dense " << n_dense << ' ';
-            std::cout << ":m_dense " << m_dense << ' ';
-            std::cout << ":size_dense " << size_dense << ' ';
-        }
-
-        outputWitnessQuality(prm, witnesses);
-
-        std::cout << '}' << std::endl;
     }
-    std::cout << ']' << std::endl;
 
+    if (baswana)
+    {
+        // Stretch must be of the form 2k+1 for some integer k > 0.
+        assert(std::floor((stretch+1)/2) == (stretch+1)/2);
+        unsigned int k = (stretch+1)/2;
+        assert(k > 0);
+        std::cout << " :k " << k << ' ' << std::endl;
+
+        BaswanaSpanner spannerCalc(g, 1000, k, false);
+        std::cout << " :after_baswana " << spannerCalc.calculateSpanner().size();
+    }
+
+    outputWitnessQuality(planner, witnesses);
+    std::cout << " :m " << num_edges(g);
     std::cout << '}' << std::endl;
 }
 
@@ -267,6 +260,7 @@ int main(int argc, char* argv[])
         ("time", po::value<double>(), "maximum time (seconds)")
         ("witness", po::value<unsigned int>(), "generate (w^2 * w)/2 queries")
         ("seed", po::value<boost::uint32_t>(), "PRNG seed")
+        ("baswana", po::value<int>(), "use 2k-1 randomized spanner algorithm")
     ;
 
     po::variables_map vm;
@@ -292,6 +286,7 @@ int main(int argc, char* argv[])
     const double max_time = vm["time"].as<double>();
     const unsigned int witness_samples = vm["witness"].as<unsigned int>();
     const boost::uint32_t seed = vm["seed"].as<boost::uint32_t>();
+    const int baswana = vm["baswana"].as<int>();
     
     // =========================================================================
 
@@ -306,7 +301,8 @@ int main(int argc, char* argv[])
     // setting collision checking resolution to 1% of the space extent
     setup->getSpaceInformation()->setStateValidityCheckingResolution(0.01);
 
-    ob::PlannerPtr planner = setupPlanner(setup->getSpaceInformation(), stretch, epsilon);
+    ob::PlannerPtr planner = setupPlanner(
+        setup->getSpaceInformation(), stretch, epsilon, baswana);
     setup->setPlanner(planner);
     setup->setup();
 
@@ -320,5 +316,5 @@ int main(int argc, char* argv[])
     // =========================================================================
 
     runExperiment(planner, witnesses, max_size, max_time,
-        environment, stretch, epsilon);
+        environment, stretch, epsilon, baswana);
 }

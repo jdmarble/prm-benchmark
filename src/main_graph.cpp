@@ -14,10 +14,10 @@
 #include <omplapp/apps/SE3RigidBodyPlanning.h>
 #include <omplapp/apps/SE2RigidBodyPlanning.h>
 
-#include <boost/graph/astar_search.hpp>
 #include <boost/program_options.hpp>
 #include <iostream>
 
+#include <boost/graph/graphviz.hpp>
 #include <boost/foreach.hpp>
 #define foreach BOOST_FOREACH
 
@@ -27,11 +27,33 @@ namespace b = boost;
 namespace po = boost::program_options;
 
 typedef ob::RealVectorStateSpace::StateType R2State;
+typedef ob::SE2StateSpace::StateType SE2State;
 typedef og::PRM::Graph Graph;
 typedef og::PRM::Vertex Vertex;
 typedef og::PRM::Edge Edge;
 typedef std::pair<ob::State*, ob::State*> Witness;
 
+/*
+    // cast the abstract state type to the type we expect
+
+ */
+
+class state_writer {
+    public:
+    state_writer(const Graph& g) : g(g) {}
+
+    void operator()(std::ostream& out, const Vertex& v) const
+    {
+        const ob::State* state = g[v].state;
+        const SE2State* se2state = state->as<SE2State>();
+        const double x = se2state->getX() * 5;
+        const double y = se2state->getY() * 5;
+
+        out << "[ label=\"\" shape=point pos=\"" << x << ',' << y << "\"]";
+    }
+private:
+    const Graph& g;
+};
 
 ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
     const double stretch, const double epsilon)
@@ -59,68 +81,7 @@ ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
     return planner;
 }
 
-void outputWitnessQuality (og::PRM* const prm,
-    const std::vector<Witness>& witnesses)
-{
-    og::PRM::Graph& g = prm->getRoadmap();
-    boost::vector_property_map<double> distance_map(boost::num_vertices(g) + 2);
-
-    const ompl::time::point start_time = ompl::time::now();
-    double search_time = 0;
-
-    std::cout << ":costs [";
-    foreach (const Witness& witness, witnesses)
-    {
-        Vertex start = prm->addFakeMilestone(witness.first);
-        Vertex goal = prm->addFakeMilestone(witness.second);
-
-        const ompl::time::point search_start = ompl::time::now();
-
-        b::astar_search(g, start,
-            b::bind(&og::PRM::distanceFunction, prm, _1, goal),
-            b::weight_map(boost::get(&og::PRM::EdgeProperties::weight, g))
-                    .distance_map(distance_map));
-
-        search_time += ompl::time::seconds(ompl::time::now() - search_start);
-
-        std::cout << distance_map[goal] << ' ';
-
-        b::clear_vertex(goal, g);
-        b::remove_vertex(goal, g);
-        b::clear_vertex(start, g);
-        b::remove_vertex(start, g);
-    }
-    std::cout << ']';
-
-    const double query_time = ompl::time::seconds(ompl::time::now() - start_time);
-
-    std::cout << " :query_time " << query_time / witnesses.size();
-    std::cout << " :search_time " << search_time / witnesses.size();
-}
-
-void generateWitnesses (const unsigned int n, ob::PlannerPtr planner,
-    std::vector<Witness>& output)
-{
-    assert(output.empty());
-    ob::SpaceInformationPtr si = planner->getSpaceInformation();
-    ob::ValidStateSamplerPtr sampler = si->allocValidStateSampler();
-
-    std::vector<ob::State*> samples;
-    for (unsigned int i = 0; i < n; ++i)
-    {
-        ob::State* state = si->allocState();
-        sampler->sample(state);
-
-        foreach(ob::State* const goal, samples)
-            output.push_back(std::make_pair(state, goal));
-
-        samples.push_back(state);
-    }
-
-    assert(output.size() == (n*n - n)/2);
-}
-
-void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesses,
+void runExperiment (ob::PlannerPtr planner,
     const unsigned int max_size, const double max_time,
     const std::string& environment, const double stretch, const double epsilon)
 {
@@ -136,53 +97,16 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
 
     const Graph& g = planner->as<og::PRM>()->getRoadmap();
 
-    std::cout << "{:environment :" << environment <<
-        " :planner :" << planner->getName();
-
-    if (stretch > 1.0)
-        std::cout << " :stretch " << stretch;
-    if (epsilon > 0.0)
-        std::cout << " :epsilon " << epsilon;
-
-    std::cout << " :data [" << std::endl;
     unsigned int size = 0;
     double time = 0;
-    const double time_step = 10.0;
+    const double time_step = 1.0;
     while (size < max_size && time < max_time)
     {
         planner->as<og::PRM>()->growRoadmap(time_step);
         time += time_step;
-        const unsigned int n = b::num_vertices(g);
-        const unsigned int m = b::num_edges(g);
-        size = (n * vertex_size) + (m * edge_size);
-
-        std::cout << '{';
-        std::cout << ":n " << n << ' ';
-        std::cout << ":m " << m << ' ';
-        std::cout << ":time " << time << ' ';  // TODO: Use timer for better accuracy!
-        std::cout << ":size " << size << ' ';
-
-        const og::IRS2* const irs2 = dynamic_cast<const og::IRS2*>(planner.get());
-        if (irs2 != NULL)
-        {
-            std::cout << ":max_failures " << irs2->getMaxFailures() << ' ';
-            const Graph& g_dense = irs2->getDenseRoadmap();
-            const unsigned int n_dense = b::num_vertices(g_dense);
-            const unsigned int m_dense = b::num_edges(g_dense);
-            const unsigned int size_dense = (n_dense * vertex_size) + (m_dense * edge_size);
-
-            std::cout << ":n_dense " << n_dense << ' ';
-            std::cout << ":m_dense " << m_dense << ' ';
-            std::cout << ":size_dense " << size_dense << ' ';
-        }
-
-        outputWitnessQuality(prm, witnesses);
-
-        std::cout << '}' << std::endl;
     }
-    std::cout << ']' << std::endl;
 
-    std::cout << '}' << std::endl;
+    b::write_graphviz(std::cout, g, state_writer(g));
 }
 
 bool isR2StateValid(const ob::State *state)
@@ -252,10 +176,6 @@ int main(int argc, char* argv[])
     // Turn off logging to std::out. Need the stream for file output.
     ompl::msg::noOutputHandler();
 
-    // Use the same seed for each run to get the same witnesses.
-    // Later, change the seed to the one specified on the command line.
-    ompl::RNG::setSeed(1);
-
     // Declare the supported options.
     po::options_description desc("Allowed options");
     desc.add_options()
@@ -309,16 +229,8 @@ int main(int argc, char* argv[])
     ob::PlannerPtr planner = setupPlanner(setup->getSpaceInformation(), stretch, epsilon);
     setup->setPlanner(planner);
     setup->setup();
-
-    std::vector<Witness> witnesses;
-    generateWitnesses(witness_samples, planner, witnesses);
-    // Set real seed -after- so each run has the same witnesses but different
-    // results.
-    for(boost::uint32_t i; i < seed; ++i)
-        ompl::RNG discard(); // Hack to advance the seeds...
     
     // =========================================================================
 
-    runExperiment(planner, witnesses, max_size, max_time,
-        environment, stretch, epsilon);
+    runExperiment(planner, max_size, max_time, environment, stretch, epsilon);
 }
