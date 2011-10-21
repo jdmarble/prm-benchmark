@@ -179,19 +179,19 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
     unsigned int space = 0;
     unsigned int n = 0;
     double time = 0;
-    while (n < max_size && (max_space == 0 || space < max_space) && time < max_time)
+    while ((max_size == 0 || n < max_size) && (max_space == 0 || space < max_space) && time < max_time)
     {
         planner->as<og::PRM>()->growRoadmap(time_step);
         time += time_step;
         n = b::num_vertices(g);
         const unsigned int m = b::num_edges(g);
-        size = (n * vertex_size) + (m * edge_size);
+        space = (n * vertex_size) + (m * edge_size);
 
         std::cout << '{';
         std::cout << ":n " << n << ' ';
         std::cout << ":m " << m << ' ';
         std::cout << ":time " << time << ' ';
-        std::cout << ":size " << size << ' ';
+        std::cout << ":size " << space << ' ';
 
         const og::IRS2* const irs2 = dynamic_cast<const og::IRS2*>(planner.get());
         if (irs2 != NULL)
@@ -227,13 +227,13 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
 
         const unsigned int n = b::num_vertices(g);
         const unsigned int m = b::num_edges(g);
-        size = (n * vertex_size) + (m * edge_size);
+        const unsigned int space = (n * vertex_size) + (m * edge_size);
 
         std::cout << '{';
         std::cout << ":n " << n << ' ';
         std::cout << ":m " << m << ' ';
         std::cout << ":time " << time << ' ';
-        std::cout << ":size " << size << ' ';
+        std::cout << ":size " << space << ' ';
         outputWitnessQuality(prm, witnesses);
         std::cout << '}' << std::endl;
 
@@ -321,7 +321,7 @@ int main(int argc, char* argv[])
         ("environment", po::value<std::string>()->default_value("point"), "environment name")
         ("stretch",     po::value<double>()->default_value(1.0),          "stretch factor")
         ("error",       po::value<double>()->default_value(0.0),          "additive error term")
-        ("space",       po::value<unsigned int>()->default_value(10000),  "maximum size of roadmap (bytes)")
+        ("space",       po::value<unsigned int>()->default_value(0),      "maximum size of roadmap (bytes)")
         ("size",        po::value<unsigned int>()->default_value(0),      "maximum size of roadmap (nodes)")
         ("time",        po::value<double>()->default_value(10.0),         "maximum time (seconds)")
         ("witness",     po::value<unsigned int>()->default_value(2),      "generate (w^2 * w)/2 queries")
@@ -358,7 +358,7 @@ int main(int argc, char* argv[])
     const bool baswana = vm["baswana"].as<bool>();
     const double time_step = vm["step"].as<double>();
 
-    assert(time_step < max_time);
+    assert(time_step <= max_time);
     // =========================================================================
 
     og::SimpleSetup* setup;
