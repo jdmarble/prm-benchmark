@@ -31,22 +31,4 @@ target_link_libraries(${PROJECT_NAME}
 	${Boost_PROGRAM_OPTIONS_LIBRARY}
 	)
 
-add_executable(unf src/main_smooth.cpp)
-target_link_libraries(unf
-	${OMPL_LIBRARY}
-	${OMPLAPP_LIBRARY}
-	${PQP_LIBRARY}
-	${ASSIMP_LIBRARY}
-	${Boost_PROGRAM_OPTIONS_LIBRARY}
-	)
-
-add_executable(draw_graph src/main_graph.cpp)
-target_link_libraries(draw_graph
-	${OMPL_LIBRARY}
-	${OMPLAPP_LIBRARY}
-	${PQP_LIBRARY}
-	${ASSIMP_LIBRARY}
-	${Boost_LIBRARIES}
-	)
-
 #add_subdirectory(${PROJECT_SOURCE_DIR}/tests)

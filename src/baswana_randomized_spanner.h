@@ -95,6 +95,7 @@ struct PRM_EdgeEq
     const Graph& g_;
 };
 
+typedef unordered_set<Edge, PRM_EdgeHash, PRM_EdgeEq> EdgeSet;
 
 class BaswanaSpanner
 {
@@ -122,7 +123,6 @@ class BaswanaSpanner
     // Stats
     unsigned int step3a, step3b;
     
-    typedef unordered_set<Edge, PRM_EdgeHash, PRM_EdgeEq> EdgeSet;
     EdgeSet E_;
 
 public:

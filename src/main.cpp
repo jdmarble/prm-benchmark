@@ -21,6 +21,8 @@
 #include <boost/foreach.hpp>
 #define foreach BOOST_FOREACH
 
+#include "baswana_randomized_spanner.h"
+
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
 namespace b = boost;
@@ -33,13 +35,32 @@ typedef og::PRM::Edge Edge;
 typedef std::pair<ob::State*, ob::State*> Witness;
 
 
+struct Edge_not_in_set
+{
+    Edge_not_in_set(const EdgeSet& edge_set) : edge_set(edge_set) {}
+
+    bool operator()(const Edge& e)
+    {
+        return edge_set.find(e) == edge_set.end();
+    }
+
+    const EdgeSet& edge_set;
+};
+
 ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
-    const double stretch, const double epsilon)
+    const double stretch, const double epsilon, const bool baswana)
 {
     ob::PlannerPtr planner;
     if (stretch > 1.0 && epsilon > 0.0)
+    {
+        if (baswana)
+        {
+            std::cerr << "Can't run Baswana algorithm with additive term.";
+            exit(1);
+        }
         planner.reset(new og::IRS2(si, stretch, epsilon));
-    else if (stretch > 1.0)
+    }
+    else if (stretch > 1.0 && !baswana)
     {
         planner.reset(new og::PRM(si, true));
         planner->setName("IRS");
@@ -121,8 +142,10 @@ void generateWitnesses (const unsigned int n, ob::PlannerPtr planner,
 }
 
 void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesses,
-    const unsigned int max_size, const double max_time,
-    const std::string& environment, const double stretch, const double epsilon)
+    const unsigned int max_size, const double max_time, const unsigned int max_space,
+    const double time_step,
+    const std::string& environment, const double stretch, const double epsilon,
+    const bool baswana, const boost::uint32_t seed)
 {
     og::PRM* prm = dynamic_cast<og::PRM*>(planner.get());
     assert(prm != NULL);
@@ -134,32 +157,40 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
     const unsigned int edge_size = sizeof(og::PRM::EdgeProperties) +
         2 * sizeof(Vertex);
 
-    const Graph& g = planner->as<og::PRM>()->getRoadmap();
+    Graph& g = planner->as<og::PRM>()->getRoadmap();
 
     std::cout << "{:environment :" << environment <<
         " :planner :" << planner->getName();
 
-    if (stretch > 1.0)
-        std::cout << " :stretch " << stretch;
-    if (epsilon > 0.0)
-        std::cout << " :epsilon " << epsilon;
+    std::cout << " :stretch " << stretch;
+    std::cout << " :epsilon " << epsilon;
+
+    unsigned int k;
+    if (baswana)
+    {
+        // Stretch must be of the form 2k+1 for some integer k > 0.
+        assert(std::floor((stretch+1)/2) == (stretch+1)/2);
+        k = (stretch+1)/2;
+        assert(k > 1);
+        std::cout << " :k " << k;
+    }
 
     std::cout << " :data [" << std::endl;
-    unsigned int size = 0;
+    unsigned int space = 0;
+    unsigned int n = 0;
     double time = 0;
-    const double time_step = 10.0;
-    while (size < max_size && time < max_time)
+    while (n < max_size && (max_space == 0 || space < max_space) && time < max_time)
     {
         planner->as<og::PRM>()->growRoadmap(time_step);
         time += time_step;
-        const unsigned int n = b::num_vertices(g);
+        n = b::num_vertices(g);
         const unsigned int m = b::num_edges(g);
         size = (n * vertex_size) + (m * edge_size);
 
         std::cout << '{';
         std::cout << ":n " << n << ' ';
         std::cout << ":m " << m << ' ';
-        std::cout << ":time " << time << ' ';  // TODO: Use timer for better accuracy!
+        std::cout << ":time " << time << ' ';
         std::cout << ":size " << size << ' ';
 
         const og::IRS2* const irs2 = dynamic_cast<const og::IRS2*>(planner.get());
@@ -180,8 +211,35 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
 
         std::cout << '}' << std::endl;
     }
-    std::cout << ']' << std::endl;
 
+    if (baswana)
+    {
+        BaswanaSpanner spannerCalc(g, seed, k, false);
+
+        const ompl::time::point spanner_start = ompl::time::now();
+        const list<Edge>& spanner_edges = spannerCalc.calculateSpanner();
+        time += ompl::time::seconds(ompl::time::now() - spanner_start);
+
+        // Remove edges not in the set of spanner edges.
+        EdgeSet spanner_set(spanner_edges.begin(), spanner_edges.end(),
+                            4, PRM_EdgeHash(g), PRM_EdgeEq(g));
+        boost::remove_edge_if(Edge_not_in_set(spanner_set), g);
+
+        const unsigned int n = b::num_vertices(g);
+        const unsigned int m = b::num_edges(g);
+        size = (n * vertex_size) + (m * edge_size);
+
+        std::cout << '{';
+        std::cout << ":n " << n << ' ';
+        std::cout << ":m " << m << ' ';
+        std::cout << ":time " << time << ' ';
+        std::cout << ":size " << size << ' ';
+        outputWitnessQuality(prm, witnesses);
+        std::cout << '}' << std::endl;
+
+    }
+
+    std::cout << ']' << std::endl;
     std::cout << '}' << std::endl;
 }
 
@@ -260,14 +318,18 @@ int main(int argc, char* argv[])
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help", "produce help message")
-        ("environment", po::value<std::string>(), "environment name")
-        ("t", po::value<double>(), "stretch factor")
-        ("e", po::value<double>(), "additive error term")
-        ("size", po::value<unsigned int>(), "maximum size of roadmap (bytes)")
-        ("time", po::value<double>(), "maximum time (seconds)")
-        ("witness", po::value<unsigned int>(), "generate (w^2 * w)/2 queries")
-        ("seed", po::value<boost::uint32_t>(), "PRNG seed")
-    ;
+        ("environment", po::value<std::string>()->default_value("point"), "environment name")
+        ("stretch",     po::value<double>()->default_value(1.0),          "stretch factor")
+        ("error",       po::value<double>()->default_value(0.0),          "additive error term")
+        ("space",       po::value<unsigned int>()->default_value(10000),  "maximum size of roadmap (bytes)")
+        ("size",        po::value<unsigned int>()->default_value(0),      "maximum size of roadmap (nodes)")
+        ("time",        po::value<double>()->default_value(10.0),         "maximum time (seconds)")
+        ("witness",     po::value<unsigned int>()->default_value(2),      "generate (w^2 * w)/2 queries")
+        ("seed",        po::value<boost::uint32_t>()->default_value(1),   "PRNG seed")
+        ("baswana",     po::value<bool>()->default_value(false),          "run spanner after")
+        ("step",        po::value<double>()->default_value(1.0),          "time step")
+     ;
+
 
     po::variables_map vm;
     try
@@ -286,13 +348,17 @@ int main(int argc, char* argv[])
         return 1;
     }
     const std::string environment = vm["environment"].as<std::string>();
-    const double stretch = vm["t"].as<double>();
-    const double epsilon = vm["e"].as<double>();
+    const double stretch = vm["stretch"].as<double>();
+    const double epsilon = vm["error"].as<double>();
     const unsigned int max_size = vm["size"].as<unsigned int>();
+    const unsigned int max_space = vm["space"].as<unsigned int>();
     const double max_time = vm["time"].as<double>();
     const unsigned int witness_samples = vm["witness"].as<unsigned int>();
     const boost::uint32_t seed = vm["seed"].as<boost::uint32_t>();
-    
+    const bool baswana = vm["baswana"].as<bool>();
+    const double time_step = vm["step"].as<double>();
+
+    assert(time_step < max_time);
     // =========================================================================
 
     og::SimpleSetup* setup;
@@ -306,7 +372,7 @@ int main(int argc, char* argv[])
     // setting collision checking resolution to 1% of the space extent
     setup->getSpaceInformation()->setStateValidityCheckingResolution(0.01);
 
-    ob::PlannerPtr planner = setupPlanner(setup->getSpaceInformation(), stretch, epsilon);
+    ob::PlannerPtr planner = setupPlanner(setup->getSpaceInformation(), stretch, epsilon, baswana);
     setup->setPlanner(planner);
     setup->setup();
 
@@ -319,6 +385,7 @@ int main(int argc, char* argv[])
     
     // =========================================================================
 
-    runExperiment(planner, witnesses, max_size, max_time,
-        environment, stretch, epsilon);
+    runExperiment(planner, witnesses, max_size, max_time, max_space, time_step,
+        environment, stretch, epsilon, baswana, seed);
+
 }
