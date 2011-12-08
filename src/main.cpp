@@ -74,7 +74,11 @@ ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
     else
     {
         planner.reset(new og::PRM(si, true));
-        planner->setName("kPRM_star");
+
+	if (stretch > 1.0)
+	  planner->setName("SRS");
+	else
+	  planner->setName("kPRM*");
     }
 
     return planner;
@@ -159,8 +163,8 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
 
     Graph& g = planner->as<og::PRM>()->getRoadmap();
 
-    std::cout << "{:environment :" << environment <<
-        " :planner :" << planner->getName();
+    std::cout << "{:environment \"" << environment <<
+      "\" :planner \"" << planner->getName() << '"';
 
     std::cout << " :stretch " << stretch;
     std::cout << " :epsilon " << epsilon;
@@ -218,7 +222,9 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
 
         const ompl::time::point spanner_start = ompl::time::now();
         const list<Edge>& spanner_edges = spannerCalc.calculateSpanner();
-        time += ompl::time::seconds(ompl::time::now() - spanner_start);
+
+	const double additional_time = ompl::time::seconds(ompl::time::now() - spanner_start);
+        time += additional_time;
 
         // Remove edges not in the set of spanner edges.
         EdgeSet spanner_set(spanner_edges.begin(), spanner_edges.end(),
@@ -233,6 +239,7 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
         std::cout << ":n " << n << ' ';
         std::cout << ":m " << m << ' ';
         std::cout << ":time " << time << ' ';
+	std::cout << ":additional_time " << additional_time << ' ';
         std::cout << ":size " << space << ' ';
         outputWitnessQuality(prm, witnesses);
         std::cout << '}' << std::endl;
