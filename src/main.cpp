@@ -123,6 +123,51 @@ void outputWitnessQuality (og::PRM* const prm,
     std::cout << " :search_time " << search_time / witnesses.size();
 }
 
+void outputSmoothingQuality (ob::PlannerPtr planner,
+    const std::vector<Witness>& witnesses)
+{
+    std::vector<ob::PathPtr> solution_paths;
+    foreach (const Witness& witness, witnesses)
+    {
+        planner->getProblemDefinition()
+            ->setStartAndGoalStates(witness.first, witness.second);
+        planner->solve(1.0);
+        ob::PathPtr path =
+            planner->getProblemDefinition()->getGoal()->getSolutionPath();
+        solution_paths.push_back(path);
+    }
+
+    og::PathSimplifier simplifier(planner->getSpaceInformation());
+
+    const ompl::time::point start = ompl::time::now();
+
+    double original_cost = 0;
+    double smoothed_cost = 0;
+    unsigned int successful_queries = 0;
+    foreach (ob::PathPtr path, solution_paths)
+    {
+      if(path)
+	{
+        original_cost += path->length();
+        og::PathGeometric* gPath = dynamic_cast<og::PathGeometric*>(path.get());
+        gPath->subdivide();
+        gPath->subdivide();
+        gPath->subdivide();
+        simplifier.simplifyMax(*gPath);
+        smoothed_cost += path->length();
+	++successful_queries;
+	}
+    }
+    
+    const double smoothing_time = ompl::time::seconds(ompl::time::now() - start);
+
+    const double mean_original_cost = original_cost / successful_queries;
+    const double mean_smoothed_cost = smoothed_cost / successful_queries;
+
+    std::cout << " :smoothing_rate " << mean_smoothed_cost / mean_original_cost;
+    std::cout << " :smoothing_time " << smoothing_time / witnesses.size();
+}
+
 void generateWitnesses (const unsigned int n, ob::PlannerPtr planner,
     std::vector<Witness>& output)
 {
@@ -247,6 +292,9 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
     }
 
     std::cout << ']' << std::endl;
+
+    outputSmoothingQuality(planner, witnesses);
+
     std::cout << '}' << std::endl;
 }
 
