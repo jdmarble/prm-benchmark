@@ -9,6 +9,7 @@
 #include <ompl/geometric/planners/prm/ConnectionFilter.h>
 #include <ompl/geometric/planners/prm/ConnectionStrategy.h>
 #include <ompl/geometric/SimpleSetup.h>
+#include <ompl/base/ProblemDefinition.h>
 
 #include <omplapp/config.h>
 #include <omplapp/apps/SE3RigidBodyPlanning.h>
@@ -126,46 +127,54 @@ void outputWitnessQuality (og::PRM* const prm,
 void outputSmoothingQuality (ob::PlannerPtr planner,
     const std::vector<Witness>& witnesses)
 {
-    std::vector<ob::PathPtr> solution_paths;
+    og::PathSimplifier simplifier(planner->getSpaceInformation());
+    double total_original_cost = 0;
+    double total_smoothed_cost = 0;
+    double total_smoothing_time = 0;
+    unsigned int solution_count = 0;
+
+    std::cout << " :smoothed_costs [";
+
     foreach (const Witness& witness, witnesses)
     {
-        planner->getProblemDefinition()
-            ->setStartAndGoalStates(witness.first, witness.second);
-        planner->solve(1.0);
-        ob::PathPtr path =
-            planner->getProblemDefinition()->getGoal()->getSolutionPath();
-        solution_paths.push_back(path);
-    }
+      ob::ProblemDefinitionPtr problem(new ob::ProblemDefinition(planner->getSpaceInformation()));
+      problem->setStartAndGoalStates(witness.first, witness.second);
+      
+      planner->setProblemDefinition(problem);
+      planner->solve(1.0);
+      ob::GoalPtr goal = planner->getProblemDefinition()->getGoal();
 
-    og::PathSimplifier simplifier(planner->getSpaceInformation());
-
-    const ompl::time::point start = ompl::time::now();
-
-    double original_cost = 0;
-    double smoothed_cost = 0;
-    unsigned int successful_queries = 0;
-    foreach (ob::PathPtr path, solution_paths)
-    {
-      if(path)
+      if (goal->isAchieved())
 	{
-        original_cost += path->length();
-        og::PathGeometric* gPath = dynamic_cast<og::PathGeometric*>(path.get());
-        gPath->subdivide();
-        gPath->subdivide();
-        gPath->subdivide();
-        simplifier.simplifyMax(*gPath);
-        smoothed_cost += path->length();
-	++successful_queries;
+	  ob::PathPtr path = goal->getSolutionPath();
+	  if (path->check() && path->length() < 1000000)
+	  {
+	    double presmooth = path->length();
+	    og::PathGeometric* gPath = dynamic_cast<og::PathGeometric*>(path.get());
+      
+	    const ompl::time::point start = ompl::time::now();
+	    simplifier.reduceVertices(*gPath);
+	    const double smooth_time = ompl::time::seconds(ompl::time::now() - start);
+
+	    double postsmooth = path->length();
+
+	    std::cout << " [" << presmooth << ' ' << postsmooth << ' ' << smooth_time << ']';
+
+	    total_original_cost += presmooth;
+	    total_smoothed_cost += postsmooth;
+	    total_smoothing_time += smooth_time;
+	    ++solution_count;
+	  }
 	}
     }
-    
-    const double smoothing_time = ompl::time::seconds(ompl::time::now() - start);
 
-    const double mean_original_cost = original_cost / successful_queries;
-    const double mean_smoothed_cost = smoothed_cost / successful_queries;
+    std::cout << ']';
+
+    const double mean_original_cost = total_original_cost / solution_count;
+    const double mean_smoothed_cost = total_smoothed_cost / solution_count;
 
     std::cout << " :smoothing_rate " << mean_smoothed_cost / mean_original_cost;
-    std::cout << " :smoothing_time " << smoothing_time / witnesses.size();
+    std::cout << " :smoothing_time " << total_smoothing_time / solution_count;
 }
 
 void generateWitnesses (const unsigned int n, ob::PlannerPtr planner,
