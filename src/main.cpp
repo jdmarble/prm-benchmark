@@ -1,3 +1,10 @@
+#include <iostream>
+
+#include <boost/foreach.hpp>
+#define foreach BOOST_FOREACH
+#include <boost/graph/astar_search.hpp>
+#include <boost/program_options.hpp>
+
 #include <ompl/config.h>
 #include <ompl/util/RandomNumbers.h>
 #include <ompl/util/Time.h>
@@ -15,14 +22,8 @@
 #include <omplapp/apps/SE3RigidBodyPlanning.h>
 #include <omplapp/apps/SE2RigidBodyPlanning.h>
 
-#include <boost/graph/astar_search.hpp>
-#include <boost/program_options.hpp>
-#include <iostream>
-
-#include <boost/foreach.hpp>
-#define foreach BOOST_FOREACH
-
 #include "baswana_randomized_spanner.h"
+#include "greedy_naive_spanner.h"
 
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
@@ -49,19 +50,24 @@ struct Edge_not_in_set
 };
 
 ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
-    const double stretch, const double epsilon, const bool baswana)
+			     const double stretch, const double epsilon, const bool baswana, const bool greedy)
 {
     ob::PlannerPtr planner;
-    if (stretch > 1.0 && epsilon > 0.0)
+    if (stretch < 1.0)
     {
-        if (baswana)
+        planner.reset(new og::PRM(si, false));
+        planner->setName("kPRM");
+    }
+    else if (stretch > 1.0 && epsilon > 0.0)
+    {
+        if (baswana || greedy)
         {
-            std::cerr << "Can't run Baswana algorithm with additive term.";
+            std::cerr << "Can't run post-processing algorithm with additive term.";
             exit(1);
         }
         planner.reset(new og::IRS2(si, stretch, epsilon));
     }
-    else if (stretch > 1.0 && !baswana)
+    else if (stretch > 1.0 && !baswana && !greedy)
     {
         planner.reset(new og::PRM(si, true));
         planner->setName("IRS");
@@ -76,10 +82,18 @@ ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
     {
         planner.reset(new og::PRM(si, true));
 
-	if (stretch > 1.0)
-	  planner->setName("SRS");
-	else
+	if (stretch == 1.0)
 	  planner->setName("kPRM*");
+	else if (stretch > 1.0 && baswana)
+	  planner->setName("SRS");
+	else if (stretch > 1.0 && greedy)
+	  planner->setName("SRS_greedy");
+	else
+	{
+	  std::cerr << "Illegal stretch for given arguments." << std::endl;
+	  exit(1);
+	}    
+
     }
 
     return planner;
@@ -89,7 +103,7 @@ void outputWitnessQuality (og::PRM* const prm,
     const std::vector<Witness>& witnesses)
 {
     og::PRM::Graph& g = prm->getRoadmap();
-    boost::vector_property_map<double> distance_map(boost::num_vertices(g) + 2);
+    std::vector<double> distance_map;
 
     const ompl::time::point start_time = ompl::time::now();
     double search_time = 0;
@@ -100,12 +114,15 @@ void outputWitnessQuality (og::PRM* const prm,
         Vertex start = prm->addFakeMilestone(witness.first);
         Vertex goal = prm->addFakeMilestone(witness.second);
 
+	distance_map.clear();
+	distance_map.resize(b::num_vertices(g));
+
         const ompl::time::point search_start = ompl::time::now();
 
         b::astar_search(g, start,
             b::bind(&og::PRM::distanceFunction, prm, _1, goal),
             b::weight_map(boost::get(&og::PRM::EdgeProperties::weight, g))
-                    .distance_map(distance_map));
+                    .distance_map(&distance_map[0]));
 
         search_time += ompl::time::seconds(ompl::time::now() - search_start);
 
@@ -124,50 +141,64 @@ void outputWitnessQuality (og::PRM* const prm,
     std::cout << " :search_time " << search_time / witnesses.size();
 }
 
-void outputSmoothingQuality (ob::PlannerPtr planner,
+void outputSmoothingQuality (og::PRM* const prm,
     const std::vector<Witness>& witnesses)
 {
-    og::PathSimplifier simplifier(planner->getSpaceInformation());
+    og::PathSimplifier simplifier(prm->getSpaceInformation());
     double total_original_cost = 0;
     double total_smoothed_cost = 0;
     double total_smoothing_time = 0;
     unsigned int solution_count = 0;
 
-    std::cout << " :smoothed_costs [";
+    og::PRM::Graph& g = prm->getRoadmap();
+    std::vector<double> distance_map;
 
+    const ompl::time::point start_time = ompl::time::now();
+    double search_time = 0;
+
+    std::cout << " :smoothed_costs [";
     foreach (const Witness& witness, witnesses)
     {
-      ob::ProblemDefinitionPtr problem(new ob::ProblemDefinition(planner->getSpaceInformation()));
-      problem->setStartAndGoalStates(witness.first, witness.second);
-      
-      planner->setProblemDefinition(problem);
-      planner->solve(1.0);
-      ob::GoalPtr goal = planner->getProblemDefinition()->getGoal();
+        Vertex start = prm->addFakeMilestone(witness.first);
+        Vertex goal = prm->addFakeMilestone(witness.second);
 
-      if (goal->isAchieved())
+	distance_map.clear();
+	distance_map.resize(b::num_vertices(g));
+
+        const ompl::time::point search_start = ompl::time::now();
+
+        b::astar_search(g, start,
+            b::bind(&og::PRM::distanceFunction, prm, _1, goal),
+            b::weight_map(boost::get(&og::PRM::EdgeProperties::weight, g))
+                    .distance_map(&distance_map[0]));
+
+        search_time += ompl::time::seconds(ompl::time::now() - search_start);
+
+	const double unsmoothed_cost = distance_map[goal];
+	if (unsmoothed_cost < std::numeric_limits<double>::max())
 	{
-	  ob::PathPtr path = goal->getSolutionPath();
-	  if (path->check() && path->length() < 1000000)
-	  {
-	    double presmooth = path->length();
-	    og::PathGeometric* gPath = dynamic_cast<og::PathGeometric*>(path.get());
-      
-	    const ompl::time::point start = ompl::time::now();
-	    simplifier.reduceVertices(*gPath);
-	    const double smooth_time = ompl::time::seconds(ompl::time::now() - start);
+	  ob::PathPtr path = prm->constructSolution(start, goal);
+	  og::PathGeometric* gPath = dynamic_cast<og::PathGeometric*>(path.get());
+	  assert(unsmoothed_cost == path->length());
 
-	    double postsmooth = path->length();
+	  const ompl::time::point start = ompl::time::now();
+	  simplifier.reduceVertices(*gPath);
+	  const double smooth_time = ompl::time::seconds(ompl::time::now() - start);
 
-	    std::cout << " [" << presmooth << ' ' << postsmooth << ' ' << smooth_time << ']';
+	  const double smoothed_cost = path->length();
 
-	    total_original_cost += presmooth;
-	    total_smoothed_cost += postsmooth;
+	  std::cout << '[' << unsmoothed_cost << ' ' << smoothed_cost << ' ' << smooth_time << "] ";
+	    total_original_cost += unsmoothed_cost;
+	    total_smoothed_cost += smoothed_cost;
 	    total_smoothing_time += smooth_time;
 	    ++solution_count;
-	  }
-	}
-    }
+	 }
 
+        b::clear_vertex(goal, g);
+        b::remove_vertex(goal, g);
+        b::clear_vertex(start, g);
+        b::remove_vertex(start, g);
+    }
     std::cout << ']';
 
     const double mean_original_cost = total_original_cost / solution_count;
@@ -203,7 +234,7 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
     const unsigned int max_size, const double max_time, const unsigned int max_space,
     const double time_step,
     const std::string& environment, const double stretch, const double epsilon,
-    const bool baswana, const boost::uint32_t seed)
+		    const bool baswana, const bool greedy, const boost::uint32_t seed)
 {
     og::PRM* prm = dynamic_cast<og::PRM*>(planner.get());
     assert(prm != NULL);
@@ -215,7 +246,7 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
     const unsigned int edge_size = sizeof(og::PRM::EdgeProperties) +
         2 * sizeof(Vertex);
 
-    Graph& g = planner->as<og::PRM>()->getRoadmap();
+    Graph& g = prm->getRoadmap();
 
     std::cout << "{:environment \"" << environment <<
       "\" :planner \"" << planner->getName() << '"';
@@ -297,12 +328,40 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
         std::cout << ":size " << space << ' ';
         outputWitnessQuality(prm, witnesses);
         std::cout << '}' << std::endl;
+    }
+    else if (greedy)
+    {
 
+      boost::function<double (const Vertex, const Vertex)> d =
+	boost::bind(&ompl::geometric::PRM::distanceFunction, prm, _1, _2);
+      GreedyNaiveSpanner spannerCalc(g, stretch, d);
+
+        const ompl::time::point spanner_start = ompl::time::now();
+        spannerCalc.calculateSpanner();
+	const double additional_time = ompl::time::seconds(ompl::time::now() - spanner_start);
+        time += additional_time;
+
+    foreach(Edge e, edges(g))
+      if (g[e].weight <= 0)
+	std::cerr << source(e, g) << ':' << target(e, g) << '=' << g[e].weight << ',';
+
+        const unsigned int n = b::num_vertices(g);
+        const unsigned int m = b::num_edges(g);
+        const unsigned int space = (n * vertex_size) + (m * edge_size);
+
+        std::cout << '{';
+        std::cout << ":n " << n << ' ';
+        std::cout << ":m " << m << ' ';
+        std::cout << ":time " << time << ' ';
+	std::cout << ":additional_time " << additional_time << ' ';
+        std::cout << ":size " << space << ' ';
+        outputWitnessQuality(prm, witnesses);
+        std::cout << '}' << std::endl;
     }
 
     std::cout << ']' << std::endl;
 
-    outputSmoothingQuality(planner, witnesses);
+    outputSmoothingQuality(prm, witnesses);
 
     std::cout << '}' << std::endl;
 }
@@ -319,7 +378,7 @@ bool isR2StateValid(const ob::State *state)
     return !(inSlat && x > -0.75 && x < 0.75);
 }
 
-og::SimpleSetup* setupR2()
+og::SimpleSetup* setupR2(bool obstacles)
 {
     ob::StateSpacePtr space(new ob::RealVectorStateSpace(2));
     ob::RealVectorBounds bounds(2);
@@ -329,9 +388,10 @@ og::SimpleSetup* setupR2()
 
     og::SimpleSetup* setup = new og::SimpleSetup(space);
 
-    // setting collision checking resolution to 1% of the space extent
-    setup->getSpaceInformation()->setStateValidityChecker(
-        boost::bind(&isR2StateValid, _1));
+    if (obstacles) {
+        setup->getSpaceInformation()->setStateValidityChecker(
+            boost::bind(&isR2StateValid, _1));
+    }
 
     return setup;
 }
@@ -342,29 +402,39 @@ og::SimpleSetup* setupSE3(const std::string environment)
     ompl::app::SE3RigidBodyPlanning* setup
         = new ompl::app::SE3RigidBodyPlanning();
 
-    // load the robot and the environment
-    const std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR)
-            + "/3D/" + environment + "_robot.dae";
-    const std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR)
-            + "/3D/" + environment + "_env.dae";
-    setup->setRobotMesh(robot_fname.c_str());
-    setup->setEnvironmentMesh(env_fname.c_str());
+    if (environment != "se3Free") {
+        // load the robot and the environment
+        const std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR)
+                + "/3D/" + environment + "_robot.dae";
+        const std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR)
+                + "/3D/" + environment + "_env.dae";
+        setup->setRobotMesh(robot_fname.c_str());
+        setup->setEnvironmentMesh(env_fname.c_str());
+    } else {
+        const std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR)
+                + "/3D/Easy_robot.dae";
+        setup->setRobotMesh(robot_fname.c_str());
+    }
 
     return setup;
 }
 
-og::SimpleSetup* setupSE2()
+og::SimpleSetup* setupSE2(bool obstacles)
 {
     ompl::app::SE2RigidBodyPlanning* setup
         = new ompl::app::SE2RigidBodyPlanning();
 
-    // load the robot and the environment
+    // Load the robot
     const std::string robot_fname = std::string(OMPLAPP_RESOURCE_DIR)
             + "/2D/UniqueSolutionMaze_robot.dae";
-    const std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR)
-            + "/2D/UniqueSolutionMaze_env.dae";
     setup->setRobotMesh(robot_fname.c_str());
-    setup->setEnvironmentMesh(env_fname.c_str());
+
+    if (obstacles) {
+        // load the environment
+        const std::string env_fname = std::string(OMPLAPP_RESOURCE_DIR)
+                + "/2D/UniqueSolutionMaze_env.dae";
+        setup->setEnvironmentMesh(env_fname.c_str());
+    }
 
     return setup;
 }
@@ -388,10 +458,11 @@ int main(int argc, char* argv[])
         ("space",       po::value<unsigned int>()->default_value(0),      "maximum size of roadmap (bytes)")
         ("size",        po::value<unsigned int>()->default_value(0),      "maximum size of roadmap (nodes)")
         ("time",        po::value<double>()->default_value(10.0),         "maximum time (seconds)")
+        ("step",        po::value<double>()->default_value(1.0),          "time step")
         ("witness",     po::value<unsigned int>()->default_value(2),      "generate (w^2 * w)/2 queries")
         ("seed",        po::value<boost::uint32_t>()->default_value(1),   "PRNG seed")
-        ("baswana",     po::value<bool>()->default_value(false),          "run spanner after")
-        ("step",        po::value<double>()->default_value(1.0),          "time step")
+        ("baswana",     po::value<bool>()->default_value(false),          "run Baswana spanner after")
+        ("greedy",      po::value<bool>()->default_value(false),          "run greedy spanner after")
      ;
 
 
@@ -417,26 +488,32 @@ int main(int argc, char* argv[])
     const unsigned int max_size = vm["size"].as<unsigned int>();
     const unsigned int max_space = vm["space"].as<unsigned int>();
     const double max_time = vm["time"].as<double>();
+    const double time_step = vm["step"].as<double>();
     const unsigned int witness_samples = vm["witness"].as<unsigned int>();
     const boost::uint32_t seed = vm["seed"].as<boost::uint32_t>();
     const bool baswana = vm["baswana"].as<bool>();
-    const double time_step = vm["step"].as<double>();
+    const bool greedy = vm["greedy"].as<bool>();
 
     assert(time_step <= max_time);
+    assert(!(baswana && greedy));
     // =========================================================================
 
     og::SimpleSetup* setup;
     if (environment == "point")
-        setup = setupR2();
+        setup = setupR2(true);
     else if (environment == "maze")
-        setup = setupSE2();
+        setup = setupSE2(true);
+    else if (environment == "r2Free")
+        setup = setupR2(false);
+    else if (environment == "se2Free")
+        setup = setupSE2(false);
     else
         setup = setupSE3(environment);
 
     // setting collision checking resolution to 1% of the space extent
     setup->getSpaceInformation()->setStateValidityCheckingResolution(0.01);
 
-    ob::PlannerPtr planner = setupPlanner(setup->getSpaceInformation(), stretch, epsilon, baswana);
+    ob::PlannerPtr planner = setupPlanner(setup->getSpaceInformation(), stretch, epsilon, baswana, greedy);
     setup->setPlanner(planner);
     setup->setup();
 
@@ -450,6 +527,6 @@ int main(int argc, char* argv[])
     // =========================================================================
 
     runExperiment(planner, witnesses, max_size, max_time, max_space, time_step,
-        environment, stretch, epsilon, baswana, seed);
+		  environment, stretch, epsilon, baswana, greedy, seed);
 
 }
