@@ -24,6 +24,7 @@
 
 #include "baswana_randomized_spanner.h"
 #include "greedy_naive_spanner.h"
+#include "remove_random_edges.h"
 
 namespace ob = ompl::base;
 namespace og = ompl::geometric;
@@ -50,7 +51,7 @@ struct Edge_not_in_set
 };
 
 ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
-			     const double stretch, const double epsilon, const bool baswana, const bool greedy)
+			     const double stretch, const double epsilon, const bool baswana, const bool greedy, const double random)
 {
     ob::PlannerPtr planner;
     if (stretch < 1.0)
@@ -58,7 +59,7 @@ ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
         planner.reset(new og::PRM(si, false));
         planner->setName("kPRM");
     }
-    else if (stretch > 1.0 && epsilon > 0.0)
+    else if (stretch < 1.0)
     {
         if (baswana || greedy)
         {
@@ -67,7 +68,16 @@ ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
         }
         planner.reset(new og::IRS2(si, stretch, epsilon));
     }
-    else if (stretch > 1.0 && !baswana && !greedy)
+    else if (stretch > 1.0 && epsilon > 0.0)
+    {
+        if (baswana || greedy || random > 0.0)
+        {
+            std::cerr << "Can't run post-processing algorithm with additive term.";
+            exit(1);
+        }
+        planner.reset(new og::IRS2(si, stretch, epsilon));
+    }
+    else if (stretch > 1.0 && !baswana && !greedy && !(random > 0.0))
     {
         planner.reset(new og::PRM(si, true));
         planner->setName("IRS");
@@ -82,8 +92,10 @@ ob::PlannerPtr setupPlanner (const ob::SpaceInformationPtr si,
     {
         planner.reset(new og::PRM(si, true));
 
-	if (stretch == 1.0)
+	if (stretch == 1.0 && random == 0.0)
 	  planner->setName("kPRM*");
+	else if (stretch == 1.0 && random > 0.0)
+	  planner->setName("random");
 	else if (stretch > 1.0 && baswana)
 	  planner->setName("SRS");
 	else if (stretch > 1.0 && greedy)
@@ -234,7 +246,8 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
     const unsigned int max_size, const double max_time, const unsigned int max_space,
     const double time_step,
     const std::string& environment, const double stretch, const double epsilon,
-		    const bool baswana, const bool greedy, const boost::uint32_t seed)
+		    const bool baswana, const bool greedy, const double random,
+		    const boost::uint32_t seed)
 {
     og::PRM* prm = dynamic_cast<og::PRM*>(planner.get());
     assert(prm != NULL);
@@ -262,6 +275,11 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
         k = (stretch+1)/2;
         assert(k > 1);
         std::cout << " :k " << k;
+    }
+
+    if (random != 0.0) {
+	assert(random > 0.0);
+        std::cout << " :probability " << random;
     }
 
     std::cout << " :data [" << std::endl;
@@ -358,7 +376,30 @@ void runExperiment (ob::PlannerPtr planner, const std::vector<Witness>& witnesse
         outputWitnessQuality(prm, witnesses);
         std::cout << '}' << std::endl;
     }
+    else if (random > 0.0)
+    {
 
+      RemoveRandomEdges spannerCalc(g, seed, random);
+
+        const ompl::time::point spanner_start = ompl::time::now();
+        spannerCalc.calculateSpanner();
+	const double additional_time = ompl::time::seconds(ompl::time::now() - spanner_start);
+        time += additional_time;
+
+    foreach(Edge e, edges(g))
+        const unsigned int n = b::num_vertices(g);
+        const unsigned int m = b::num_edges(g);
+        const unsigned int space = (n * vertex_size) + (m * edge_size);
+
+        std::cout << '{';
+        std::cout << ":n " << n << ' ';
+        std::cout << ":m " << m << ' ';
+        std::cout << ":time " << time << ' ';
+	std::cout << ":additional_time " << additional_time << ' ';
+        std::cout << ":size " << space << ' ';
+        outputWitnessQuality(prm, witnesses);
+        std::cout << '}' << std::endl;
+    }
     std::cout << ']' << std::endl;
 
     outputSmoothingQuality(prm, witnesses);
@@ -463,6 +504,7 @@ int main(int argc, char* argv[])
         ("seed",        po::value<boost::uint32_t>()->default_value(1),   "PRNG seed")
         ("baswana",     po::value<bool>()->default_value(false),          "run Baswana spanner after")
         ("greedy",      po::value<bool>()->default_value(false),          "run greedy spanner after")
+        ("random",      po::value<double>()->default_value(0.0),          "remove edges with this probability")
      ;
 
 
@@ -493,6 +535,7 @@ int main(int argc, char* argv[])
     const boost::uint32_t seed = vm["seed"].as<boost::uint32_t>();
     const bool baswana = vm["baswana"].as<bool>();
     const bool greedy = vm["greedy"].as<bool>();
+    const double random = vm["random"].as<double>();
 
     assert(time_step <= max_time);
     assert(!(baswana && greedy));
@@ -513,7 +556,7 @@ int main(int argc, char* argv[])
     // setting collision checking resolution to 1% of the space extent
     setup->getSpaceInformation()->setStateValidityCheckingResolution(0.01);
 
-    ob::PlannerPtr planner = setupPlanner(setup->getSpaceInformation(), stretch, epsilon, baswana, greedy);
+    ob::PlannerPtr planner = setupPlanner(setup->getSpaceInformation(), stretch, epsilon, baswana, greedy, random);
     setup->setPlanner(planner);
     setup->setup();
 
@@ -527,6 +570,6 @@ int main(int argc, char* argv[])
     // =========================================================================
 
     runExperiment(planner, witnesses, max_size, max_time, max_space, time_step,
-		  environment, stretch, epsilon, baswana, greedy, seed);
+		  environment, stretch, epsilon, baswana, greedy, random, seed);
 
 }
